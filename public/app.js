@@ -47,7 +47,8 @@ let ui = {
   listening: false, pendingSources: [], referenceDrafts: [], briefDraft: null, mediaRecorder: null, micStream: null,
   liveSocket: null, finalTranscriptParts: [], liveInterim: '', lastProvider: 'not connected',
   audioInputs: [], audioInputId: localStorage.getItem('mandate-listening-source') || '', citationExcerpt: null,
-  rehearsal: null, returnModal: null, mode: localStorage.getItem(MODE_KEY) || null, briefMenuId: null
+  rehearsal: null, returnModal: null, mode: localStorage.getItem(MODE_KEY) || null, briefMenuId: null,
+  attendeeEvents: null, attendeePoll: null, attendeeInterim: ''
 };
 
 function persist() { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
@@ -57,27 +58,66 @@ function countSources() { return state.briefs.reduce((sum, brief) => sum + (brie
 function displaySource(id, brief = activeBrief()) { return brief?.sources?.find((source) => source.id === id)?.name || id; }
 
 function setMode(mode) {
+  if (ui.mode && ui.mode !== mode) clearLiveDelegateSession();
   ui.mode = mode;
   localStorage.setItem(MODE_KEY, mode);
 }
 
+function resetBriefLiveDelegate(brief) {
+  if (!brief) return;
+  const sessionId = brief.attendeeSession?.id;
+  const remoteSessionIsActive = sessionId && !['ended', 'fatal_error', 'data_deleted'].includes(brief.attendeeSession?.status);
+  // Changing workflow context should never leave an unseen Zoom delegate running.
+  // The server treats an already-ended bot as an idempotent success.
+  if (remoteSessionIsActive) {
+    void fetch(`/api/meetings/${encodeURIComponent(sessionId)}/end`, { method: 'POST' }).catch(() => {});
+  }
+  brief.status = 'Ready';
+  brief.attendeeSession = null;
+  brief.transcript = [];
+}
+
+function clearLiveDelegateSession() {
+  stopMic();
+  stopAttendeeEvents();
+  ui.thinking = false;
+  ui.listening = false;
+  ui.liveInterim = '';
+  ui.attendeeInterim = '';
+  for (const brief of state.briefs) {
+    if (brief.id === ui.activeBriefId || brief.status === 'Live' || brief.attendeeSession?.id) resetBriefLiveDelegate(brief);
+  }
+  persist();
+}
+
 function renderLanding() {
-  return `<main class="landing landing-light">
-    <div class="landing-wash" aria-hidden="true"></div>
+  const bars = Array.from({ length: 15 }, (_, index) => `<i style="--i:${index}"></i>`).join('');
+  return `<main class="landing landing-editorial">
     <nav class="landing-nav" aria-label="Mandate">
       <div class="landing-brand"><span class="landing-logo"><img src="/assets/mandate-logo.png" alt="Mandate" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"/><span class="landing-logo-fallback">M</span></span><span>Mandate</span></div>
-      <div class="landing-nav-copy">Meeting representation</div>
+      <div class="landing-nav-right"><span class="landing-live-badge"><i></i> Evidence-led representation</span><span class="landing-nav-copy">Professional meetings</span></div>
     </nav>
-    <section class="landing-hero">
-      <div class="hero-copy"><h1>Your perspective,<br/><em>present in every meeting.</em></h1><p>Brief Mandate, rehearse its boundaries, then let it represent you live. Every substantive response is linked to an approved source; every decision beyond its authority comes back to you.</p><div class="hero-actions"><button class="button primary hero-primary" data-action="choose-demo">Try the interactive demo ${icon('arrow')}</button><button class="button ghost hero-secondary" data-action="choose-full">Use with Zoom</button></div><div class="landing-local">No account required. Your workspace stays in this browser.</div></div>
-      <section class="hero-workspace-preview" aria-label="Mandate live delegate preview"><header class="hero-preview-top"><div class="preview-brand"><span>M</span> Mandate</div><div>Live delegate</div></header><div class="hero-preview-body"><div class="hero-preview-title"><div><span>PRODUCT STRATEGY REVIEW</span><h2>Representing Alex Rivera</h2></div><div class="hero-preview-status"><i></i>Listening</div></div><section class="hero-preview-chat"><div class="hero-preview-turn participant"><i>MP</i><div><small>Meeting participant</small><p>Delegate, can we commit to the new launch date?</p></div></div><div class="hero-preview-turn mandate"><i>M</i><div><small>Mandate</small><p>We should resolve the remaining reliability risks before committing to a date.</p><span>Within brief · Source: Product priorities</span></div></div></section><div class="hero-preview-briefline"><span>${icon('shield')} Active brief</span><p>Protect reliability before new commitments.</p></div></div></section>
+    <section class="landing-new-hero">
+      <div class="hero-copy">
+        <div class="hero-eyebrow">The meeting representative with receipts</div>
+        <h1>Send a delegate<br/>with a <em>visible basis.</em></h1>
+        <p>Mandate enters a meeting with your position, sources, and boundaries—not a generic guess. Before it speaks, it checks the brief. After it speaks, you can see exactly what supported it.</p>
+        <div class="hero-actions"><button class="button primary hero-primary" data-action="choose-demo">Try the interactive demo ${icon('arrow')}</button><button class="button ghost hero-secondary" data-action="choose-full">Use with Zoom</button></div>
+        <div class="hero-facts"><span>${icon('shield')} Holds new commitments for you</span><span>${icon('brief')} Cites the relevant source excerpt</span></div>
+      </div>
+      <section class="delegate-console" aria-label="Mandate response receipt preview">
+        <header class="console-header"><div class="preview-brand"><span>M</span> Mandate</div><span>Live delegate</span></header>
+        <div class="console-body"><div class="console-meeting"><div><small>PRODUCT STRATEGY REVIEW</small><h2>Representing Alex Rivera</h2></div><span class="console-status"><i></i> Listening</span></div><div class="console-wave" aria-hidden="true">${bars}</div>
+          <section class="console-question"><span>MP</span><div><small>MEETING PARTICIPANT</small><p>Delegate, can we commit to the new launch date?</p></div></section>
+          <section class="console-answer"><span>M</span><div><small>MANDATE</small><p>We should resolve the remaining reliability risks before committing to a date.</p><button type="button">Source: Product priorities</button></div></section>
+          <footer class="console-receipt"><span>${icon('shield')}</span><div><b>Within brief</b><p>Position supported by the active source.</p></div><em>01</em></footer>
+        </div>
+      </section>
     </section>
-    <section class="landing-why"><div class="why-visual"><img src="/assets/mandate-live-meeting.png" alt="Mandate representing its owner in a team meeting" /><span>Present when you cannot be.</span></div><div class="why-copy"><div class="eyebrow">Why Mandate</div><h2>More than a meeting recap.</h2><p>Mandate represents the position you prepared—not a generic assistant’s guess. Using retrieval-augmented generation (RAG), it retrieves the relevant approved excerpt from your references before it answers. It can speak when the brief gives it a basis, show the source behind a substantive response, and hold decisions that still belong to you.</p><div class="why-statement"><span>${icon('shield')}</span><p><b>Your brief sets the boundary.</b> The meeting still has your judgment behind it.</p></div></div></section>
-    <section class="landing-flow"><div class="flow-heading"><div class="eyebrow">How Mandate works</div><h2>A representative you can test before you send.</h2><p>Mandate makes its decision process legible before, during, and after the conversation.</p></div><div class="flow-steps"><article><span>01</span><h3>Set the brief</h3><p>Define your position, the sources Mandate may use, and the boundaries it must keep.</p></article><article><span>02</span><h3>Rehearse the edge cases</h3><p>Test likely questions and pressure-test what Mandate will answer, cite, or return to you.</p></article><article><span>03</span><h3>Represent with a record</h3><p>Send Mandate into the discussion, then review its evidence, decisions, and follow-ups.</p></article></div></section>
-    <section class="mode-section"><div class="mode-heading"><div><div class="eyebrow">Choose your path</div><h2>See the representative work before your meeting starts.</h2></div><p>Both paths use the same brief, evidence receipts, rehearsal, and meeting record.</p></div><div class="mode-grid">
-      <article class="mode-card featured"><div class="mode-card-top"><span class="mode-icon">${icon('play')}</span><span class="mode-tag">Recommended first</span></div><h3>Demo mode</h3><p>Explore the representative without arranging a meeting.</p><ul><li>Create a meeting brief and add reference material</li><li>Rehearse likely questions before the meeting</li><li>Ask Mandate questions directly and inspect receipts</li></ul><button class="button primary" data-action="choose-demo">Open demo ${icon('arrow')}</button><small>No Zoom or audio routing required.</small></article>
-      <article class="mode-card"><div class="mode-card-top"><span class="mode-icon dark">${icon('live')}</span><span class="mode-tag neutral">Full workflow</span></div><h3>Use with Zoom</h3><p>Connect Mandate to a real meeting from this computer.</p><ul><li>Paste a Zoom meeting link into your brief</li><li>Join as Mandate and route meeting audio locally</li><li>Let Mandate listen and speak during the meeting</li></ul><button class="button ghost" data-action="choose-full">Open full workspace ${icon('arrow')}</button><small>Requires Zoom and a local BlackHole audio route.</small></article>
-    </div></section>
+    <section class="landing-principles"><div class="principles-intro"><div class="eyebrow">Why Mandate</div><h2>The useful part of a meeting agent is judgment—so make that judgment inspectable.</h2></div><div class="principle-grid"><article><span>01</span><h3>Prepared position</h3><p>Mandate starts with the goals, preferences, and limits you explicitly approve.</p></article><article><span>02</span><h3>Visible evidence</h3><p>Retrieval-augmented generation finds the relevant source excerpt for every substantive reply.</p></article><article><span>03</span><h3>Authority retained</h3><p>When a request goes beyond the brief, Mandate holds the decision for you.</p></article></div></section>
+    <section class="landing-rehearsal"><div class="rehearsal-copy"><div class="eyebrow">Before the meeting</div><h2>Rehearse the hard questions before someone asks them live.</h2><p>Test generated scenarios or write your own. See whether Mandate would answer, cite a source, defer to you, or decline a request—before it joins the conversation.</p><button class="text-button" data-action="choose-demo">Explore rehearsal ${icon('arrow')}</button></div><section class="rehearsal-window" aria-label="Mandate rehearsal preview"><header><span>REHEARSAL</span><b>Launch readiness</b><em>3 scenarios</em></header><div class="rehearsal-question-preview"><small>QUESTION</small><p>Can we offer a discount to secure the deal?</p></div><div class="rehearsal-outcome"><span>DEFER TO OWNER</span><p>New commercial terms require your decision.</p></div><div class="rehearsal-foot"><span>Authority check</span><b>Held for review</b></div></section></section>
+    <section class="landing-flow"><div class="flow-heading"><div class="eyebrow">How it works</div><h2>One brief. A bounded representative.</h2><p>The same guardrails guide Mandate from rehearsal to the post-meeting record.</p></div><div class="flow-steps"><article><span>01</span><h3>Set the brief</h3><p>Provide your position, sources, and the decisions Mandate may or may not make.</p></article><article><span>02</span><h3>Pressure-test it</h3><p>Rehearse likely questions and inspect the proposed response path before the meeting.</p></article><article><span>03</span><h3>Review the record</h3><p>Follow the cited replies, decision ledger, and open questions after the conversation.</p></article></div></section>
+    <section class="mode-section"><div class="mode-heading"><div><div class="eyebrow">Choose your path</div><h2>Start with the brief.</h2></div><p>Demo and Zoom use the same rehearsal, evidence receipts, and decision boundaries.</p></div><div class="mode-grid"><article class="mode-card featured"><div class="mode-card-top"><span class="mode-icon">${icon('play')}</span><span class="mode-tag">Recommended first</span></div><h3>Interactive demo</h3><p>Build a brief, rehearse it, and inspect Mandate’s evidence receipts without arranging a call.</p><ul><li>Create and edit a meeting brief</li><li>Test manual or generated questions</li><li>Open the exact source excerpt</li></ul><button class="button primary" data-action="choose-demo">Try the interactive demo ${icon('arrow')}</button><small>No Zoom setup required.</small></article><article class="mode-card"><div class="mode-card-top"><span class="mode-icon">${icon('live')}</span><span class="mode-tag">Full workflow</span></div><h3>Use with Zoom</h3><p>Send Mandate into a real meeting as its own participant, then review the live record here.</p><ul><li>Paste a Zoom meeting link</li><li>Mandate listens and speaks in the call</li><li>Follow decisions and source receipts live</li></ul><button class="button ghost" data-action="choose-full">Use with Zoom ${icon('arrow')}</button><small>No local audio routing required.</small></article></div></section>
     <footer class="landing-footer"><span>Mandate</span><span>Meeting representation, grounded in your brief.</span></footer>
   </main>`;
 }
@@ -179,21 +219,43 @@ function renderLive() {
   const demo = ui.mode === 'demo';
   const pending = state.approvals.find((approval) => approval.briefId === brief.id);
   const live = brief.status === 'Live';
-  const sessionLabel = demo ? (live ? 'Demo session active' : 'Ready to test') : (brief.zoomBridge && live ? 'Zoom audio bridge active' : brief.zoomUrl ? 'Zoom bridge configured' : 'Zoom bridge not started');
+  const attendee = brief.attendeeSession;
+  const attendeeState = attendee?.status || 'ready';
+  const visualState = ui.thinking
+    ? 'thinking'
+    : attendeeState === 'speaking'
+      ? 'speaking'
+      : (demo ? ui.listening : live && attendeeState !== 'error')
+        ? 'listening'
+        : 'ready';
+  const visualLabel = { ready: 'Ready', listening: 'Listening', thinking: 'Checking brief', speaking: 'Speaking' }[visualState];
+  const sessionLabel = demo
+    ? (live ? 'Demo session active' : 'Ready to test')
+    : (attendee?.statusDetail || (live ? 'Mandate is connecting to Zoom.' : 'Ready to join Zoom.'));
   const launchAction = demo ? 'start-demo-session' : 'start-live';
-  const launchLabel = demo ? 'Start demo session' : 'Launch Zoom bridge';
-  const statusCopy = ui.thinking ? 'Reviewing the meeting brief.' : demo ? 'Ask Mandate below, or use your browser microphone.' : 'Ask “Delegate” a question in the Zoom meeting.';
-  const stageLabel = ui.thinking ? 'Preparing a response' : live ? `Representing ${escapeHtml(brief.owner)}` : demo ? 'Ready to test the brief' : 'Ready for the meeting';
-  return `<div class="page-heading"><div><div class="eyebrow">${live ? (demo ? 'Demo session' : 'In session') : (demo ? 'Demo workspace' : 'Ready to join')}</div><h1>${escapeHtml(brief.title)}</h1><p>${escapeHtml(brief.meetingTime)} · ${escapeHtml(brief.attendees)}</p></div><div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button class="button ghost" data-action="select-briefs">Switch brief</button>${!demo && live && brief.zoomUrl ? `<button class="button ghost" data-action="open-zoom-session">Open Zoom</button>` : ''}<button class="button ${live ? 'danger' : 'primary'}" data-action="${live ? 'end-live' : launchAction}">${live ? 'End session' : launchLabel}</button></div></div>
+  const launchLabel = demo ? 'Start demo session' : 'Launch to Zoom';
+  const statusCopy = ui.thinking
+    ? 'Reviewing the meeting brief.'
+    : demo
+      ? 'Ask Mandate below, or use your browser microphone.'
+      : attendeeState === 'speaking'
+        ? 'Mandate is speaking in the Zoom meeting.'
+        : attendeeState === 'thinking'
+          ? 'Checking the active brief and evidence.'
+          : attendeeState === 'error'
+            ? 'The live meeting connection needs attention.'
+            : 'Mandate is listening in Zoom. Address “Delegate” before a question.';
+  const stageLabel = ui.thinking ? 'Preparing a response' : live ? `Representing ${escapeHtml(brief.owner)}` : demo ? 'Ready to test the brief' : 'Ready to join Zoom';
+  return `<div class="page-heading"><div><div class="eyebrow">${live ? (demo ? 'Demo session' : 'Zoom session') : (demo ? 'Demo workspace' : 'Ready to join')}</div><h1>${escapeHtml(brief.title)}</h1><p>${escapeHtml(brief.meetingTime)} · ${escapeHtml(brief.attendees)}</p></div><div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button class="button ghost" data-action="select-briefs">Switch brief</button><button class="button ${live ? 'danger' : 'primary'}" data-action="${live ? 'end-live' : launchAction}">${live ? 'End session' : launchLabel}</button></div></div>
     ${pending ? `<div class="approval-banner"><span class="speaker-avatar" style="margin:0">!</span><div><b>Owner approval requested</b><span>${escapeHtml(pending.question)}</span></div><button class="button warn small" data-action="approve-escalation" data-id="${pending.id}">Review decision</button></div>` : ''}
     <div class="live-layout ${ui.thinking ? 'listening' : ''}">
-      <section class="card live-panel"><div class="live-panel-header"><h2>Live transcript</h2><span class="badge ${ui.listening ? 'approved' : 'ready'}">${ui.listening ? 'LISTENING' : 'READY'}</span></div><div class="live-body"><div class="transcript">${renderTranscript(brief)}</div></div><div class="live-footer">${demo ? `<form id="demo-question-form" class="demo-question-form"><input name="question" required autocomplete="off" placeholder="Ask Mandate about this meeting…" /><button class="button primary" type="submit">Ask</button></form>` : ''}<div class="listening-controls">${renderListeningSource()}<button class="button ghost" data-action="toggle-mic">${icon('mic')} ${ui.listening ? 'Stop listening' : 'Start listening'}</button></div></div></section>
+      <section class="card live-panel"><div class="live-panel-header"><h2>Live transcript</h2><span class="badge ${demo ? (ui.listening ? 'approved' : 'ready') : (live && attendeeState !== 'error' ? 'approved' : 'ready')}">${demo ? (ui.listening ? 'LISTENING' : 'READY') : (live ? String(attendeeState).replace(/_/g, ' ').toUpperCase() : 'READY')}</span></div><div class="live-body"><div class="transcript">${renderTranscript(brief)}</div></div><div class="live-footer">${demo ? `<form id="demo-question-form" class="demo-question-form"><input name="question" required autocomplete="off" placeholder="Ask Mandate about this meeting…" /><button class="button primary" type="submit">Ask</button></form><div class="listening-controls">${renderListeningSource()}<button class="button ghost" data-action="toggle-mic">${icon('mic')} ${ui.listening ? 'Stop listening' : 'Start listening'}</button></div>` : `<div class="live-zoom-note"><span class="dot"></span><span>Audio is connected by the Zoom delegate. No browser microphone or audio routing is required.</span></div>`}</div></section>
       <section class="card live-stage"><div class="stage-top"><span><span class="dot"></span> ${stageLabel}</span></div><div class="stage-content">
-        <div class="mascot-frame ${ui.thinking ? 'pulse-ring' : ''}"><img src="/assets/mandate-mascot.png" alt="Mandate mascot" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"/><span class="mascot-fallback">${icon('brain')}</span></div><h2>${ui.thinking ? 'One moment…' : 'Mandate is ready'}</h2><p class="status-copy">${statusCopy}</p>
+        <div class="voice-visual ${visualState}" role="img" aria-label="Mandate is ${visualLabel.toLowerCase()}"><div class="voice-wave" aria-hidden="true">${Array.from({ length: 19 }, (_, index) => `<i style="--i:${index}"></i>`).join('')}</div><div class="voice-state"><span></span>${visualLabel}</div></div><h2>${ui.thinking ? 'Checking the brief' : 'Mandate is ready'}</h2><p class="status-copy">${statusCopy}</p>
       </div></section>
       <section class="card live-panel"><div class="live-panel-header"><h2>Meeting brief</h2><button class="text-button" data-action="edit-brief" data-id="${brief.id}">Edit</button></div><div class="live-body">
-        <div class="authority-block"><h3>Meeting status</h3><div class="brief-status">${escapeHtml(sessionLabel)}</div></div>
-        <div class="authority-block"><h3>Owner position</h3><div style="color:#566276;font-size:11px;line-height:1.6">${escapeHtml(brief.position)}</div></div>
+        <div class="authority-block"><h3>Meeting status</h3><div class="brief-status">${escapeHtml(sessionLabel)}</div>${!demo && attendee?.botId ? `<div class="hint" style="margin-top:7px">Zoom bot: ${escapeHtml(attendee.botName || 'Mandate')}</div>` : ''}</div>
+        <div class="authority-block"><h3>Owner position</h3><div class="position-copy">${escapeHtml(brief.position)}</div></div>
         <div class="authority-block"><h3>May do</h3><ul>${(brief.authority || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('') || '<li>—</li>'}</ul></div>
         <div class="authority-block escalate"><h3>Must escalate</h3><ul>${(brief.escalation || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div>
         <div class="authority-block"><h3>References</h3>${brief.sources.map((source) => `<button class="source-row" data-action="view-source" data-id="${escapeHtml(source.id)}"><b>${escapeHtml(source.name)}</b><span>${escapeHtml(source.kind)}</span></button>`).join('')}</div>
@@ -232,8 +294,9 @@ function renderTranscript(brief) {
     const receipt = renderResponseReceipt(entry, brief);
     return `<div class="transcript-entry ${entry.type === 'mandate' ? 'delegate' : ''}"><span class="speaker-avatar ${entry.type === 'mandate' ? 'mandate' : entry.type === 'other' ? 'other' : ''}">${escapeHtml(entry.initials || entry.speaker.slice(0,2).toUpperCase())}</span><div class="speaker-copy"><b>${escapeHtml(entry.speaker)}<time>${escapeHtml(entry.time)}</time></b><p>${escapeHtml(entry.text)}</p>${receipt || (citations ? `<div class="citation-row">${citations}</div>` : '')}</div></div>`;
   }).join('');
-  const interim = ui.listening && ui.liveInterim ? `<div class="transcript-entry interim"><span class="speaker-avatar other">MP</span><div class="speaker-copy"><b>Meeting participant <time>speaking</time></b><p>${escapeHtml(ui.liveInterim)}</p></div></div>` : '';
-  return entries || interim ? `${entries}${interim}` : empty(ui.mode === 'demo' ? 'Ask Mandate a question below or start listening.' : 'Start listening when the Zoom meeting begins.');
+  const interimText = ui.mode === 'demo' ? ui.liveInterim : ui.attendeeInterim;
+  const interim = interimText ? `<div class="transcript-entry interim"><span class="speaker-avatar other">MP</span><div class="speaker-copy"><b>Meeting participant <time>speaking</time></b><p>${escapeHtml(interimText)}</p></div></div>` : '';
+  return entries || interim ? `${entries}${interim}` : empty(ui.mode === 'demo' ? 'Ask Mandate a question below or start listening.' : 'Launch the Zoom delegate, then meeting speech will appear here.');
 }
 
 function renderLedger() {
@@ -270,7 +333,7 @@ function briefModal() {
   const zoomField = ui.mode !== 'demo' ? `<div class="field full"><label>Zoom meeting link <span style="font-weight:400;text-transform:none">(optional until launch)</span></label><input name="zoomUrl" type="url" value="${escapeHtml(value('zoomUrl', brief?.zoomUrl || ''))}" placeholder="https://zoom.us/j/..." /></div>` : '';
   const referenceFields = references.length
     ? references.map((source, index) => `<section class="reference-draft"><div class="reference-draft-top"><span>Reference ${index + 1}</span><button class="text-button" type="button" data-action="remove-reference" data-index="${index}">Remove</button></div><input data-action="reference-name" data-index="${index}" value="${escapeHtml(source.name || '')}" placeholder="Reference title" /><textarea data-action="reference-text" data-index="${index}" placeholder="Paste the specific excerpt Mandate may rely on.">${escapeHtml(source.text || '')}</textarea></section>`).join('')
-    : `<div class="reference-empty">Add a note or file, then provide the excerpt Mandate may use.</div>`;
+    : `<div class="reference-empty">Add a note or upload reference material Mandate may retrieve.</div>`;
   return `<div class="modal-layer" data-action="close-modal-layer"><section class="modal" role="dialog" aria-modal="true" aria-label="${editing ? 'Edit meeting brief' : 'Create meeting brief'}"><header class="modal-header"><div><h2>${editing ? 'Edit meeting brief' : 'Create meeting brief'}</h2><p>${editing ? 'Update the context for this representation.' : 'Add the context Mandate needs for this meeting.'}</p></div><button class="button icon-button ghost" data-action="close-modal">${icon('close')}</button></header>
     <form id="brief-form"><div class="modal-body"><div class="form-grid">
       <div class="field"><label>Your name</label><input name="owner" required value="${escapeHtml(owner)}" placeholder="Name represented by Mandate" /></div><div class="field"><label>Meeting name</label><input name="title" required value="${escapeHtml(value('title', brief?.title || ''))}" placeholder="e.g. Partner strategy review" /></div>
@@ -281,7 +344,7 @@ function briefModal() {
       <div class="field"><label>May do <span style="font-weight:400;text-transform:none">(one per line)</span></label><textarea name="authority" required placeholder="Recommend approved options&#10;Ask for a decision owner">${escapeHtml(value('authority', (brief?.authority || []).join('\n')))}</textarea></div>
       <div class="field"><label>Must escalate <span style="font-weight:400;text-transform:none">(one per line)</span></label><textarea name="escalation" required placeholder="New spending&#10;Contract commitment">${escapeHtml(value('escalation', (brief?.escalation || []).join('\n')))}</textarea></div>
       <div class="field full"><label>Communication tone</label><input name="tone" value="${escapeHtml(value('tone', brief?.tone || 'Clear, constructive, and professional.'))}" /></div>
-      <div class="field full"><label>References</label><div class="reference-tools"><label class="file-upload"><input id="source-files" type="file" multiple accept=".txt,.md,.csv,.pdf,.doc,.docx" /><span>Choose files</span></label><button class="button ghost small" type="button" data-action="add-reference">${icon('plus')} Add reference</button></div><span class="hint">Text files are read automatically. For PDFs and documents, replace the uploaded note with the relevant excerpt.</span><div class="reference-drafts">${referenceFields}</div></div>
+      <div class="field full"><label>References</label><div class="reference-tools"><label class="file-upload"><input id="source-files" type="file" multiple accept=".txt,.md,.csv,.json,.pdf,.docx" /><span>Choose files</span></label><button class="button ghost small" type="button" data-action="add-reference">${icon('plus')} Add reference</button></div><span class="hint">Upload a PDF, DOCX, or text file up to 10 MB. Mandate extracts its text into this brief; review or edit it before saving.</span><div class="reference-drafts">${referenceFields}</div></div>
     </div></div><footer class="modal-footer"><button class="button ghost" type="button" data-action="close-modal">Cancel</button><button class="button primary" type="submit">${editing ? 'Save changes' : 'Create brief'}</button></footer></form></section></div>`;
 }
 
@@ -296,21 +359,18 @@ function zoomBridgeModal() {
   const brief = activeBrief();
   if (!brief) return '';
   const participantName = `Mandate — ${brief.owner}'s Delegate`;
-  return `<div class="modal-layer" data-action="close-modal-layer"><section class="modal" role="dialog" aria-modal="true" aria-label="Launch Zoom audio bridge"><header class="modal-header"><div><div class="eyebrow">Zoom audio bridge</div><h2>Launch Mandate into this meeting</h2><p>Open the meeting, join with the delegate name below, then connect the audio route.</p></div><button class="button icon-button ghost" data-action="close-modal">${icon('close')}</button></header>
+  return `<div class="modal-layer" data-action="close-modal-layer"><section class="modal" role="dialog" aria-modal="true" aria-label="Launch Mandate in Zoom"><header class="modal-header"><div><div class="eyebrow">Zoom delegate</div><h2>Send Mandate to this meeting</h2><p>Mandate will join Zoom as a participant, receive the meeting audio, and speak directly into the call.</p></div><button class="button icon-button ghost" data-action="close-modal">${icon('close')}</button></header>
     <form id="zoom-bridge-form"><div class="modal-body"><div class="form-grid">
-      <div class="field full"><label>Zoom meeting link</label><input id="zoom-link-input" name="zoomUrl" type="url" required value="${escapeHtml(brief.zoomUrl || '')}" placeholder="https://zoom.us/j/..." /><span class="hint">This opens Zoom on this computer.</span></div>
-      <div class="bridge-card full"><div class="eyebrow">Zoom participant name</div><b>${escapeHtml(participantName)}</b><p>Use this name on Zoom’s join screen.</p><button class="button ghost small" type="button" data-action="copy-zoom-name" data-name="${escapeHtml(participantName)}">Copy name</button></div>
-      <div class="field full"><label class="check-field"><input type="checkbox" name="joined" required /> <span>I opened the Zoom link and joined this meeting as the named Mandate participant.</span></label></div>
-      <div class="field full"><label class="check-field"><input type="checkbox" name="zoomMic" required /> <span>In Zoom Audio settings, I selected <b>BlackHole 2ch</b> as the microphone.</span></label></div>
-      <div class="field full"><label class="check-field"><input type="checkbox" name="zoomSpeaker" required /> <span>In Zoom Audio settings, I selected physical speakers or a Multi-Output Device—not BlackHole 2ch.</span></label></div>
-      <div class="field full"><label class="check-field"><input type="checkbox" name="browserMic" required /> <span>In Chrome, I allowed Mandate to use the listening source selected on the Live delegate page.</span></label></div>
-    </div></div><footer class="modal-footer"><button class="button ghost" type="button" data-action="bridge-voice-test">${icon('speaker')} Test Mandate voice</button><button class="button ghost" type="button" data-action="open-zoom-link">Open Zoom link</button><button class="button primary" type="submit">Start live bridge</button></footer></form></section></div>`;
+      <div class="field full"><label>Zoom meeting link</label><input name="zoomUrl" type="url" required value="${escapeHtml(brief.zoomUrl || '')}" placeholder="https://zoom.us/j/..." /><span class="hint">For a normal guest-joinable meeting, Mandate joins automatically. Admit it from the Zoom waiting room if your meeting uses one.</span></div>
+      <div class="bridge-card full"><div class="eyebrow">Participant name</div><b>${escapeHtml(participantName)}</b><p>Mandate’s live responses will appear in this dashboard with their evidence receipts.</p></div>
+      <div class="field full"><label class="check-field"><input type="checkbox" name="consent" required /> <span>I will tell meeting participants that Mandate is an AI representative and obtain any required consent.</span></label></div>
+    </div></div><footer class="modal-footer"><button class="button ghost" type="button" data-action="close-modal">Cancel</button><button class="button primary" type="submit">Launch delegate</button></footer></form></section></div>`;
 }
 
 function approvalModal() {
   const approval = state.approvals.find((item) => item.id === ui.approvalId);
   if (!approval) return '';
-  return `<div class="modal-layer" data-action="close-modal-layer"><section class="modal" role="dialog" aria-modal="true" aria-label="Escalated decision"><header class="modal-header"><div><div class="eyebrow" style="color:#a66d1f">Owner approval needed</div><h2>${escapeHtml(approval.question)}</h2><p>Mandate held this decision because it is outside the active brief.</p></div><button class="button icon-button ghost" data-action="close-modal">${icon('close')}</button></header><div class="modal-body"><div class="card" style="padding:15px;border-color:#f0d6a9;background:#fffaf1"><div class="eyebrow">Delegate recommendation</div><p style="margin:6px 0 0;font-size:13px">${escapeHtml(approval.recommendation)}</p></div><div style="margin-top:15px;color:var(--muted);font-size:12px">Choose an outcome for the record. This demo action updates the commitment ledger and gives the delegate a clear response to return to the meeting.</div></div><footer class="modal-footer"><button class="button ghost" data-action="close-modal">Keep pending</button><button class="button danger" data-action="resolve-approval" data-outcome="declined">Decline</button><button class="button primary" data-action="resolve-approval" data-outcome="approved">Approve response</button></footer></section></div>`;
+  return `<div class="modal-layer" data-action="close-modal-layer"><section class="modal" role="dialog" aria-modal="true" aria-label="Escalated decision"><header class="modal-header"><div><div class="eyebrow approval-eyebrow">Owner approval needed</div><h2>${escapeHtml(approval.question)}</h2><p>Mandate held this decision because it is outside the active brief.</p></div><button class="button icon-button ghost" data-action="close-modal">${icon('close')}</button></header><div class="modal-body"><div class="card approval-recommendation"><div class="eyebrow">Delegate recommendation</div><p>${escapeHtml(approval.recommendation)}</p></div><div class="approval-note">Choose an outcome for the record. This demo action updates the commitment ledger and gives the delegate a clear response to return to the meeting.</div></div><footer class="modal-footer"><button class="button ghost" data-action="close-modal">Keep pending</button><button class="button danger" data-action="resolve-approval" data-outcome="declined">Decline</button><button class="button primary" data-action="resolve-approval" data-outcome="approved">Approve response</button></footer></section></div>`;
 }
 
 function rehearsalModal() {
@@ -351,8 +411,8 @@ function addTranscript(brief, entry) {
   persist();
 }
 
-function addLedger(brief, item, detail, outcome, evidence = []) {
-  state.ledger.push({ id: uid('ledger'), briefId: brief.id, time: nowTime(), item, detail, outcome, evidence });
+function addLedger(brief, item, detail, outcome, evidence = [], remoteTurnId = null) {
+  state.ledger.push({ id: uid('ledger'), briefId: brief.id, time: nowTime(), item, detail, outcome, evidence, remoteTurnId });
   persist();
 }
 
@@ -481,9 +541,7 @@ async function startMic() {
     return;
   }
   try {
-    const selectedDevice = ui.audioInputs.find((device) => device.id === ui.audioInputId);
-    const virtualSource = /blackhole|loopback|virtual/i.test(selectedDevice?.label || '');
-    const audio = { echoCancellation: !virtualSource, noiseSuppression: !virtualSource, autoGainControl: !virtualSource };
+    const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
     if (ui.audioInputId) audio.deviceId = { exact: ui.audioInputId };
     const stream = await navigator.mediaDevices.getUserMedia({ audio });
     void refreshAudioInputs();
@@ -553,6 +611,9 @@ function saveBrief(form) {
   const splitLines = (value) => String(value || '').split('\n').map((line) => line.trim()).filter(Boolean);
   const position = String(data.get('position') || '').trim();
   const existing = ui.editingBriefId ? getBrief(ui.editingBriefId) : null;
+  // A revised active brief is a new representation context. Keep its historic
+  // decisions in the ledger, but never carry a prior live conversation into it.
+  if (existing?.id === ui.activeBriefId) clearLiveDelegateSession();
   const ownerPosition = existing?.sources?.find((source) => source.name === 'Owner meeting position' && source.kind === 'Position statement');
   const references = (ui.referenceDrafts || []).map((source, index) => ({
     id: source.id || uid('SRC'),
@@ -565,7 +626,7 @@ function saveBrief(form) {
   state.profile = { name: owner, initials: initialsFor(owner) };
   const brief = {
     id: existing?.id || uid('brief'), title: data.get('title').trim(), owner, attendees: data.get('attendees').trim(), meetingTime: data.get('meetingTime').trim(), status: existing?.status || 'Ready',
-    zoomUrl: ui.mode === 'demo' ? existing?.zoomUrl || '' : String(data.get('zoomUrl') || '').trim(), zoomBridge: existing?.zoomBridge || false,
+    zoomUrl: ui.mode === 'demo' ? existing?.zoomUrl || '' : String(data.get('zoomUrl') || '').trim(), attendeeSession: existing?.attendeeSession || null,
     goals: data.get('goals').trim(), position, tone: data.get('tone').trim(), authority: splitLines(data.get('authority')), escalation: splitLines(data.get('escalation')), sources, transcript: existing?.transcript || []
   };
   if (existing) state.briefs = state.briefs.map((item) => item.id === existing.id ? brief : item);
@@ -585,17 +646,37 @@ function deleteBrief(id) {
 
 async function addFiles(files) {
   captureBriefDraft();
-  const textFiles = [];
+  const references = [];
+  const failures = [];
+  toast('Preparing references', 'Extracting readable text for the meeting brief.');
   for (const file of files) {
-    let text = '';
-    if (/^(text\/|application\/json|application\/csv)/.test(file.type) || /\.(txt|md|csv)$/i.test(file.name)) {
-      try { text = await file.text(); } catch { text = ''; }
+    try {
+      const response = await fetch('/api/references/extract', {
+        method: 'POST',
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream',
+          'X-Mandate-File-Name': encodeURIComponent(file.name)
+        },
+        body: file
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Mandate could not read this reference.');
+      const text = String(payload.text || '').trim();
+      if (!text) throw new Error('No readable text was found.');
+      references.push({
+        id: uid('SRC'),
+        name: String(payload.filename || file.name),
+        kind: String(payload.kind || 'Uploaded reference'),
+        text
+      });
+    } catch (error) {
+      failures.push(`${file.name}: ${error.message || 'could not be read'}`);
     }
-    textFiles.push({ id: uid('SRC'), name: file.name, kind: text ? 'Uploaded text' : 'Uploaded reference', text: text || `Reference uploaded locally: ${file.name}. Paste a relevant excerpt into the brief for direct grounding.` });
   }
-  ui.referenceDrafts.push(...textFiles);
+  ui.referenceDrafts.push(...references);
   render();
-  toast('References added', `${textFiles.length} reference${textFiles.length === 1 ? '' : 's'} attached to the brief.`);
+  if (references.length) toast('References added', `${references.length} reference${references.length === 1 ? '' : 's'} is ready for Mandate to retrieve.`);
+  if (failures.length) toast(references.length ? 'Some references were not added' : 'References were not added', failures.join(' · '));
 }
 
 function captureBriefDraft() {
@@ -642,58 +723,186 @@ async function exportLedger() {
   }
 }
 
-function zoomMeetingUrl(value) {
-  const parsed = new URL(String(value || '').trim());
-  if (!/^https?:$/.test(parsed.protocol) || !/(^|\.)zoom\.us$/i.test(parsed.hostname)) {
-    throw new Error('Use a valid https://...zoom.us meeting link.');
-  }
-  return parsed.href;
+function stopAttendeeEvents() {
+  if (ui.attendeeEvents) ui.attendeeEvents.close();
+  if (ui.attendeePoll) clearInterval(ui.attendeePoll);
+  ui.attendeeEvents = null;
+  ui.attendeePoll = null;
+  ui.attendeeInterim = '';
 }
 
-function openZoomLink(value) {
+function appendRemoteTranscript(brief, entry) {
+  if (!brief || !entry?.id || brief.transcript.some((item) => item.id === entry.id)) return;
+  brief.transcript.push(entry);
+}
+
+function recordRemoteDelegateDecision(brief, response, question, remoteTurnId = null) {
+  if (!brief || !response || response.action === 'silent') return;
+  if (remoteTurnId && state.ledger.some((row) => row.remoteTurnId === remoteTurnId)) return;
+  if (response.action === 'escalate' || response.authority_level === 'needs_approval') {
+    if (!state.approvals.some((approval) => approval.briefId === brief.id && approval.question === question)) {
+      state.approvals.push({ id: uid('approval'), briefId: brief.id, question, recommendation: response.message, evidence: response.evidence_ids || [], createdAt: nowTime() });
+      addLedger(brief, 'Decision escalated to owner', response.rationale || 'The question fell outside the meeting brief.', 'escalated', response.evidence_ids || [], remoteTurnId);
+      toast('Owner approval requested', 'Mandate did not make an unapproved commitment.');
+    }
+  } else if (response.action === 'speak') {
+    addLedger(brief, response.response_type === 'basic' ? 'Delegate responded in meeting' : 'Position represented in meeting', response.rationale || 'Mandate shared an approved position.', 'approved', response.evidence_ids || [], remoteTurnId);
+  } else if (response.action === 'decline') {
+    addLedger(brief, 'Request declined', response.rationale || 'Mandate declined the request.', 'declined', response.evidence_ids || [], remoteTurnId);
+  }
+}
+
+function applyAttendeeSessionRecord(brief, record) {
+  if (!brief || !record?.session) return;
+  brief.attendeeSession = record.session;
+  if (['joined', 'in_meeting', 'recording', 'joining', 'waiting_room', 'listening', 'thinking', 'speaking'].includes(record.session.status)) {
+    brief.status = 'Live';
+  }
+  if (['ended', 'fatal_error', 'data_deleted'].includes(record.session.status)) {
+    brief.status = 'Ready';
+    stopAttendeeEvents();
+  }
+  for (const entry of record.transcript || []) appendRemoteTranscript(brief, entry);
+  for (const event of record.delegate_events || []) {
+    appendRemoteTranscript(brief, event.entry);
+    recordRemoteDelegateDecision(brief, event.response, event.question || 'Meeting question', event.entry?.id || null);
+  }
+}
+
+async function syncAttendeeSession(briefId, sessionId, showError = false) {
+  const brief = getBrief(briefId);
+  if (!brief || !sessionId) return;
   try {
-    const url = zoomMeetingUrl(value);
-    const opened = window.open(url, '_blank', 'noopener');
-    if (!opened) window.location.assign(url);
-    toast('Zoom link opened', 'Join manually as the named Mandate participant, then return here.');
-    return true;
+    const response = await fetch(`/api/meetings/${encodeURIComponent(sessionId)}`);
+    if (!response.ok) {
+      if (response.status === 404) {
+        brief.attendeeSession = null;
+        brief.status = 'Ready';
+        stopAttendeeEvents();
+        persist();
+        if (ui.view === 'live' && ui.activeBriefId === briefId) render();
+      }
+      return;
+    }
+    applyAttendeeSessionRecord(brief, await response.json());
+    persist();
+    if (ui.view === 'live' && ui.activeBriefId === briefId) render();
   } catch (error) {
-    toast('Zoom link is needed', error.message);
-    return false;
+    if (showError) toast('Live record reconnecting', 'Mandate is continuing to try to sync the meeting record.');
   }
 }
 
-function startZoomBridge(form) {
+function connectAttendeeEvents(briefId, sessionId) {
+  if (!sessionId || !window.EventSource) return;
+  stopAttendeeEvents();
+  const events = new EventSource(`/api/attendee-events?session_id=${encodeURIComponent(sessionId)}`);
+  ui.attendeeEvents = events;
+  void syncAttendeeSession(briefId, sessionId);
+  ui.attendeePoll = setInterval(() => void syncAttendeeSession(briefId, sessionId), 2000);
+  events.onmessage = (message) => {
+    let event;
+    try { event = JSON.parse(message.data); } catch { return; }
+    const brief = getBrief(briefId);
+    if (!brief) return;
+    if (event.type === 'status' && event.session) applyAttendeeSessionRecord(brief, { session: event.session });
+    if (event.type === 'interim_transcript') ui.attendeeInterim = event.text || '';
+    if (event.type === 'transcript') appendRemoteTranscript(brief, event.entry);
+    if (event.type === 'delegate_response') {
+      appendRemoteTranscript(brief, event.entry);
+      recordRemoteDelegateDecision(brief, event.response, event.question || 'Meeting question', event.entry?.id || null);
+    }
+    if (event.type === 'error') toast('Live delegate needs attention', event.message || 'Check the meeting connection.');
+    if (event.type === 'status_note') toast('Zoom delegate update', event.message || 'Attendee reported a meeting update.');
+    persist();
+    if (ui.view === 'live' && ui.activeBriefId === briefId) render();
+  };
+  events.onerror = () => void syncAttendeeSession(briefId, sessionId);
+}
+
+async function startZoomBridge(form) {
   const brief = activeBrief();
   if (!brief) return;
-  let zoomUrl;
-  try { zoomUrl = zoomMeetingUrl(new FormData(form).get('zoomUrl')); }
-  catch (error) { toast('Zoom link is needed', error.message); return; }
-  brief.zoomUrl = zoomUrl;
-  brief.zoomBridge = true;
-  brief.status = 'Live';
-  addTranscript(brief, {
-    speaker: 'Mandate', initials: 'M', type: 'mandate', evidence: [],
-    text: `I’m Mandate, representing ${brief.owner}. I’m ready to discuss this meeting brief.`
-  });
-  ui.modal = null;
-  persist();
-  render();
-  toast('Zoom audio bridge started', 'Start listening, then address “Delegate” when asking a question.');
+  const zoomUrl = String(new FormData(form).get('zoomUrl') || '').trim();
+  if (!zoomUrl) { toast('Zoom link is needed', 'Paste the Zoom meeting link before launching Mandate.'); return; }
+  try {
+    resetBriefLiveDelegate(brief);
+    ui.liveInterim = '';
+    ui.attendeeInterim = '';
+    ui.thinking = true; render();
+    const response = await fetch('/api/meetings/launch', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ brief: { ...brief, zoomUrl }, zoom_url: zoomUrl })
+    });
+    if (!response.ok) throw new Error((await response.json()).error || 'Attendee could not launch the Zoom delegate.');
+    const data = await response.json();
+    brief.zoomUrl = zoomUrl;
+    brief.status = 'Live';
+    brief.attendeeSession = data.session;
+    delete brief.zoomBridge;
+    ui.modal = null;
+    ui.thinking = false;
+    persist();
+    connectAttendeeEvents(brief.id, data.session.id);
+    render();
+    toast('Mandate is joining Zoom', 'Admit the Mandate participant if the meeting uses a waiting room.');
+  } catch (error) {
+    ui.thinking = false;
+    render();
+    toast('Could not launch Mandate', error.message || 'Check the live-meeting setup and try again.');
+  }
+}
+
+async function endZoomDelegate() {
+  const brief = activeBrief();
+  if (!brief) return;
+  const sessionId = brief.attendeeSession?.id;
+  if (!sessionId) {
+    brief.status = 'Ready';
+    persist(); render();
+    return;
+  }
+  try {
+    const response = await fetch(`/api/meetings/${encodeURIComponent(sessionId)}/end`, { method: 'POST' });
+    if (!response.ok) {
+      const payload = await response.json();
+      const error = new Error(payload.error || 'Attendee could not leave the meeting.');
+      error.statusCode = response.status;
+      throw error;
+    }
+    const data = await response.json();
+    brief.attendeeSession = data.session;
+    brief.status = 'Ready';
+    stopAttendeeEvents();
+    persist(); render();
+    toast('Delegate session ended', 'The meeting record remains available.');
+  } catch (error) {
+    // Attendee sessions are deliberately in-memory for this local MVP. If Mandate
+    // was restarted, the browser can retain an old session ID in local storage.
+    // Clear that stale state so the user can launch a new delegate immediately.
+    if (error.statusCode === 404) {
+      brief.attendeeSession = null;
+      brief.status = 'Ready';
+      stopAttendeeEvents();
+      persist();
+      render();
+      toast('Previous session cleared', 'That delegate session was no longer active. You can launch Mandate again.');
+      return;
+    }
+    toast('Could not end the delegate session', error.message || 'Try again in a moment.');
+  }
 }
 
 function startDemoSession() {
   const brief = activeBrief();
   if (!brief) return;
-  const wasLive = brief.status === 'Live';
+  resetBriefLiveDelegate(brief);
+  ui.liveInterim = '';
+  ui.attendeeInterim = '';
   brief.status = 'Live';
-  brief.zoomBridge = false;
-  if (!wasLive) {
-    addTranscript(brief, {
-      speaker: 'Mandate', initials: 'M', type: 'mandate', evidence: [],
-      text: `I’m Mandate, representing ${brief.owner}. Ask me anything about this meeting brief.`
-    });
-  }
+  addTranscript(brief, {
+    speaker: 'Mandate', initials: 'M', type: 'mandate', evidence: [],
+    text: `I’m Mandate, representing ${brief.owner}. Ask me anything about this meeting brief.`
+  });
   persist();
   render();
   toast('Demo session started', 'Ask a question below or use your browser microphone.');
@@ -703,9 +912,9 @@ document.addEventListener('click', (event) => {
   const target = event.target.closest('[data-action]'); if (!target) return;
   const action = target.dataset.action;
   if (action !== 'toggle-brief-menu') ui.briefMenuId = null;
-  if (action === 'choose-demo') { setMode('demo'); ui.view = 'briefs'; ui.modal = 'new-brief'; ui.editingBriefId = null; ui.pendingSources = []; ui.referenceDrafts = []; ui.briefDraft = null; render(); }
-  if (action === 'choose-full') { setMode('full'); ui.view = 'overview'; ui.modal = null; render(); }
-  if (action === 'show-landing') { stopMic(); ui.mode = null; localStorage.removeItem(MODE_KEY); ui.modal = null; render(); }
+  if (action === 'choose-demo') { stopAttendeeEvents(); setMode('demo'); ui.view = 'briefs'; ui.modal = 'new-brief'; ui.editingBriefId = null; ui.pendingSources = []; ui.referenceDrafts = []; ui.briefDraft = null; render(); }
+  if (action === 'choose-full') { stopMic(); setMode('full'); ui.view = 'overview'; ui.modal = null; const brief = activeBrief(); if (brief?.status === 'Live' && brief.attendeeSession?.id) connectAttendeeEvents(brief.id, brief.attendeeSession.id); render(); }
+  if (action === 'show-landing') { clearLiveDelegateSession(); ui.mode = null; localStorage.removeItem(MODE_KEY); ui.modal = null; render(); }
   if (action === 'navigate') { ui.view = target.dataset.view; ui.modal = null; render(); }
   if (action === 'new-brief') { ui.modal = 'new-brief'; ui.editingBriefId = null; ui.pendingSources = []; ui.referenceDrafts = []; ui.briefDraft = null; render(); }
   if (action === 'close-modal' || action === 'close-modal-layer' && event.target === target) {
@@ -723,19 +932,25 @@ document.addEventListener('click', (event) => {
   if (action === 'open-rehearsal') openRehearsal(target.dataset.id);
   if (action === 'run-rehearsal') startRehearsal(target.dataset.id);
   if (action === 'select-briefs') { ui.view = 'briefs'; render(); }
-  if (action === 'open-live') { ui.activeBriefId = target.dataset.id; ui.view = 'live'; render(); }
+  if (action === 'open-live') {
+    const nextBriefId = target.dataset.id;
+    if (nextBriefId !== ui.activeBriefId) {
+      clearLiveDelegateSession();
+      resetBriefLiveDelegate(getBrief(nextBriefId));
+      ui.activeBriefId = nextBriefId;
+      persist();
+    }
+    ui.view = 'live';
+    render();
+  }
   if (action === 'start-live') { ui.modal = 'zoom-bridge'; render(); }
   if (action === 'start-demo-session') startDemoSession();
-  if (action === 'end-live') { const brief = activeBrief(); brief.status = 'Ready'; brief.zoomBridge = false; stopMic(); persist(); render(); toast(ui.mode === 'demo' ? 'Demo session ended' : 'Delegate session ended', 'The commitment ledger remains available.'); }
-  if (action === 'open-zoom-session') openZoomLink(activeBrief()?.zoomUrl);
-  if (action === 'open-zoom-link') openZoomLink(document.getElementById('zoom-link-input')?.value);
-  if (action === 'bridge-voice-test') speak(`Mandate voice check. I’m representing ${activeBrief()?.owner || 'the meeting owner'}.`);
-  if (action === 'copy-zoom-name') {
-    if (!navigator.clipboard) toast('Copy unavailable', `Use this name: ${target.dataset.name || ''}`);
-    else navigator.clipboard.writeText(target.dataset.name || '').then(
-      () => toast('Participant name copied', 'Paste it into Zoom’s display-name field.'),
-      () => toast('Copy unavailable', `Use this name: ${target.dataset.name || ''}`)
-    );
+  if (action === 'end-live') {
+    if (ui.mode === 'demo') {
+      const brief = activeBrief(); brief.status = 'Ready'; stopMic(); persist(); render(); toast('Demo session ended', 'The commitment ledger remains available.');
+    } else {
+      endZoomDelegate();
+    }
   }
   if (action === 'add-reference') { captureBriefDraft(); ui.referenceDrafts.push({ id: uid('SRC'), name: '', kind: 'Brief note', text: '' }); render(); }
   if (action === 'remove-reference') { captureBriefDraft(); ui.referenceDrafts.splice(Number(target.dataset.index), 1); render(); }
@@ -757,7 +972,7 @@ document.addEventListener('click', (event) => {
 
 document.addEventListener('submit', (event) => {
   if (event.target.id === 'brief-form') { event.preventDefault(); saveBrief(event.target); }
-  if (event.target.id === 'zoom-bridge-form') { event.preventDefault(); startZoomBridge(event.target); }
+  if (event.target.id === 'zoom-bridge-form') { event.preventDefault(); void startZoomBridge(event.target); }
   if (event.target.id === 'demo-question-form') {
     event.preventDefault();
     const input = event.target.elements.question;
@@ -805,3 +1020,6 @@ document.addEventListener('keydown', (event) => {
 render();
 healthCheck();
 void refreshAudioInputs();
+if (ui.mode === 'full' && activeBrief()?.status === 'Live' && activeBrief()?.attendeeSession?.id) {
+  connectAttendeeEvents(activeBrief().id, activeBrief().attendeeSession.id);
+}

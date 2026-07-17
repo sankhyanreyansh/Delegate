@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { WebSocket } from 'ws';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
@@ -58,6 +59,22 @@ async function verifyGemini() {
     const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
     if (JSON.parse(text).status !== 'ok') throw new Error('Unexpected verification response.');
     pass(`Gemini ${model} responded correctly`);
+    const embeddingModel = process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-001';
+    const embeddingResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(embeddingModel)}:embedContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify({
+        model: `models/${embeddingModel}`,
+        taskType: 'RETRIEVAL_DOCUMENT',
+        outputDimensionality: 768,
+        content: { parts: [{ text: 'Mandate verifies source retrieval with semantic embeddings.' }] }
+      })
+    });
+    const embeddingData = await embeddingResponse.json();
+    if (!embeddingResponse.ok || !Array.isArray(embeddingData.embedding?.values) || embeddingData.embedding.values.length !== 768) {
+      throw new Error(embeddingData.error?.message || 'Gemini embedding verification returned no 768-dimensional vector.');
+    }
+    pass(`Gemini embeddings ${embeddingModel} returned a semantic retrieval vector`);
   } catch (error) {
     fail(`Gemini check failed: ${error.message}`);
   }
@@ -66,8 +83,8 @@ async function verifyGemini() {
 async function verifyDeepgram() {
   const key = process.env.DEEPGRAM_API_KEY;
   if (!key) return fail('DEEPGRAM_API_KEY is missing from .env');
-  const ttsModel = process.env.DEEPGRAM_TTS_MODEL || 'aura-2-thalia-en';
-  const sttModel = process.env.DEEPGRAM_STT_MODEL || 'nova-3';
+  const ttsModel = process.env.DEEPGRAM_BROWSER_TTS_MODEL || 'aura-2-thalia-en';
+  const sttModel = process.env.DEEPGRAM_BROWSER_STT_MODEL || 'nova-3';
   try {
     const speech = 'This is a clear speech to text verification sentence for the Mandate meeting delegate.';
     const response = await fetch(`https://api.deepgram.com/v1/speak?model=${encodeURIComponent(ttsModel)}&encoding=linear16&container=wav`, {
@@ -92,6 +109,69 @@ async function verifyDeepgram() {
     pass(`Deepgram STT ${sttModel} transcribed the generated audio`);
   } catch (error) {
     fail(`Deepgram check failed: ${error.message}`);
+  }
+}
+
+function verifyFluxSocket(url, label) {
+  const key = process.env.DEEPGRAM_API_KEY;
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(url, { headers: { Authorization: `Token ${key}` } });
+    const timeout = setTimeout(() => {
+      try { socket.close(); } catch { /* noop */ }
+      reject(new Error('Timed out waiting for a Deepgram Flux connection.'));
+    }, 8000);
+    const finish = (error) => {
+      clearTimeout(timeout);
+      try { socket.close(); } catch { /* noop */ }
+      if (error) reject(error); else resolve();
+    };
+    socket.on('message', (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        if (message.type === 'Connected') finish();
+        if (message.type === 'Error') finish(new Error(message.description || message.code || 'Deepgram Flux rejected the connection.'));
+      } catch { /* Ignore binary or non-JSON data. */ }
+    });
+    socket.on('error', (error) => finish(error));
+    socket.on('close', () => { /* Connected or error handlers settle the promise. */ });
+  });
+}
+
+async function verifyFlux() {
+  const key = process.env.DEEPGRAM_API_KEY;
+  if (!key) return;
+  const sttModel = process.env.DEEPGRAM_STT_MODEL || 'flux-general-en';
+  const ttsModel = process.env.DEEPGRAM_TTS_MODEL || 'flux-alexis-en';
+  if (!sttModel.startsWith('flux-')) return fail('DEEPGRAM_STT_MODEL must be a Flux model for the Attendee Zoom bot.');
+  if (!ttsModel.startsWith('flux-')) return fail('DEEPGRAM_TTS_MODEL must be a Flux voice for the Attendee Zoom bot.');
+  try {
+    await verifyFluxSocket(`wss://api.deepgram.com/v2/listen?model=${encodeURIComponent(sttModel)}&encoding=linear16&sample_rate=16000`, `Flux STT ${sttModel}`);
+    pass(`Deepgram Flux STT ${sttModel} accepted a live connection`);
+    await verifyFluxSocket(`wss://api.deepgram.com/v2/speak?model=${encodeURIComponent(ttsModel)}&encoding=linear16&sample_rate=16000`, `Flux TTS ${ttsModel}`);
+    pass(`Deepgram Flux TTS ${ttsModel} accepted a live connection`);
+  } catch (error) {
+    fail(`Deepgram Flux check failed: ${error.message}`);
+  }
+}
+
+async function verifyAttendee() {
+  const key = process.env.ATTENDEE_API_KEY;
+  const secret = process.env.ATTENDEE_WEBHOOK_SECRET;
+  const base = process.env.PUBLIC_BASE_URL;
+  if (!key) return fail('ATTENDEE_API_KEY is missing from .env');
+  if (!secret) return fail('ATTENDEE_WEBHOOK_SECRET is missing from .env');
+  try {
+    const url = new URL(base || '');
+    if (url.protocol !== 'https:' || /(^|\.)(localhost|127\.0\.0\.1)$/i.test(url.hostname)) throw new Error('PUBLIC_BASE_URL must be a public https URL, not localhost.');
+  } catch (error) {
+    return fail(`Attendee public URL check failed: ${error.message}`);
+  }
+  try {
+    const response = await fetch('https://app.attendee.dev/api/v1/bots', { headers: { Authorization: `Token ${key}` } });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    pass('Attendee API key and public webhook URL are configured');
+  } catch (error) {
+    fail(`Attendee check failed: ${error.message}`);
   }
 }
 
@@ -123,6 +203,8 @@ console.log('\nMandate provider verification\n');
 await verifyDependencies();
 await verifyGemini();
 await verifyDeepgram();
+await verifyFlux();
+await verifyAttendee();
 await verifyPdf();
 
 if (failed) {
