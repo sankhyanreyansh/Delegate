@@ -1,0 +1,18 @@
+{
+  "name": "mandate-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mandate — an evidence-grounded AI meeting representative",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs",
+    "check": "node --check server.mjs && node --check public/app.js && node --check scripts/verify.mjs",
+    "verify": "node scripts/verify.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
