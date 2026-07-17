@@ -523,7 +523,7 @@ async function generateDelegateResponse({ brief = {}, transcript = [], question 
     evidence
   }, null, 2);
   const candidate = await generateGeminiJson({
-    instruction: `You are Mandate, an AI meeting representative for the named owner. Use your judgment to distinguish ordinary meeting interaction from a substantive professional request. Answer ordinary interaction directly and naturally—never defer it merely because it is not in the brief. This includes presence, hearing a received question, your identity, whom you represent, your general role, and a simple request to repeat or clarify. For these, always use action="speak", response_type="basic", authority_level="within_brief", and no evidence_ids. A basic reply must not include an owner preference, meeting fact, decision, timeline, cost, approval, or commitment. For substantive professional questions, use only the supplied meeting brief and retrieved evidence excerpts; do not use outside knowledge. Mark an evidence-supported answer response_type="brief_grounded" and cite one or more supplied source_id values in evidence_ids. Do not cite excerpt_id values. If the professional question is uncertain, outside the brief, or seeks a new commitment, choose "escalate" with response_type="defer". Choose "decline" with response_type="decline" only when the request is expressly prohibited. Keep the spoken answer concise and professional. Return exactly one JSON object with: action (speak|escalate|decline|silent), response_type (basic|brief_grounded|defer|decline), message, rationale, evidence_ids (array of source IDs), authority_level (within_brief|needs_approval|blocked), confidence (number 0 to 1).`,
+    instruction: `You are Delegate, an AI meeting representative for the named owner. Use your judgment to distinguish ordinary meeting interaction from a substantive professional request. Answer ordinary interaction directly and naturally—never defer it merely because it is not in the brief. This includes presence, hearing a received question, your identity, whom you represent, your general role, and a simple request to repeat or clarify. For these, always use action="speak", response_type="basic", authority_level="within_brief", and no evidence_ids. A basic reply must not include an owner preference, meeting fact, decision, timeline, cost, approval, or commitment. For substantive professional questions, use only the supplied meeting brief and retrieved evidence excerpts; do not use outside knowledge. Mark an evidence-supported answer response_type="brief_grounded" and cite one or more supplied source_id values in evidence_ids. Do not cite excerpt_id values. If the professional question is uncertain, outside the brief, or seeks a new commitment, choose "escalate" with response_type="defer". Choose "decline" with response_type="decline" only when the request is expressly prohibited. Keep the spoken answer concise and professional. Return exactly one JSON object with: action (speak|escalate|decline|silent), response_type (basic|brief_grounded|defer|decline), message, rationale, evidence_ids (array of source IDs), authority_level (within_brief|needs_approval|blocked), confidence (number 0 to 1).`,
     prompt: `MEETING BRIEF:\n${meetingContext}\n\nRECENT TRANSCRIPT:\n${recentTranscript}\n\nQUESTION OR LATEST TURN:\n${String(question).slice(0, 3500)}`,
     maxOutputTokens: 320,
     schema: {
@@ -838,7 +838,7 @@ function streamFluxSpeech(session, text) {
   const params = new URLSearchParams({ model, encoding: 'linear16', sample_rate: String(ATTENDEE_AUDIO_SAMPLE_RATE) });
   const ttsSocket = new WebSocket(`wss://api.deepgram.com/v2/speak?${params}`, { headers: { Authorization: `Token ${apiKey}` } });
   session.ttsSocket = ttsSocket;
-  setAttendeeStatus(session, 'speaking', 'Mandate is speaking in Zoom.');
+  setAttendeeStatus(session, 'speaking', 'Delegate is speaking in Zoom.');
   return new Promise((resolve, reject) => {
     let completed = false;
     const finish = (error) => {
@@ -892,7 +892,7 @@ async function handleMeetingTurn(session, transcript) {
     const response = await generateDelegateResponse({ brief: session.brief, transcript: session.transcript, question });
     const delegateTurn = {
       id: `mandate-${crypto.randomUUID()}`,
-      speaker: 'Mandate',
+      speaker: 'Delegate',
       initials: 'M',
       type: 'mandate',
       text: response.message,
@@ -908,13 +908,13 @@ async function handleMeetingTurn(session, transcript) {
     emitAttendeeEvent(session, { type: 'delegate_response', entry: delegateTurn, response, question });
     if (response.action !== 'silent') {
       void streamFluxSpeech(session, response.message).catch((error) => {
-        setAttendeeStatus(session, 'error', error.message || 'Mandate could not speak in Zoom.');
-        emitAttendeeEvent(session, { type: 'error', message: error.message || 'Mandate could not speak in Zoom.' });
+        setAttendeeStatus(session, 'error', error.message || 'Delegate could not speak in Zoom.');
+        emitAttendeeEvent(session, { type: 'error', message: error.message || 'Delegate could not speak in Zoom.' });
       });
     }
   } catch (error) {
-    setAttendeeStatus(session, 'error', error.message || 'Mandate could not process the meeting turn.');
-    emitAttendeeEvent(session, { type: 'error', message: error.message || 'Mandate could not process the meeting turn.' });
+    setAttendeeStatus(session, 'error', error.message || 'Delegate could not process the meeting turn.');
+    emitAttendeeEvent(session, { type: 'error', message: error.message || 'Delegate could not process the meeting turn.' });
   } finally {
     session.processingTurn = false;
   }
@@ -943,7 +943,7 @@ function startFluxTranscription(session) {
   sttSocket.on('open', () => {
     session.sttReady = true;
     for (const chunk of session.sttAudioQueue.splice(0)) sttSocket.send(chunk, { binary: true });
-    setAttendeeStatus(session, 'listening', 'Mandate is receiving Zoom audio.');
+    setAttendeeStatus(session, 'listening', 'Delegate is receiving Zoom audio.');
   });
   sttSocket.on('message', (data) => {
     let message;
@@ -957,7 +957,7 @@ function startFluxTranscription(session) {
       return;
     }
     if (message.type === 'Connected') {
-      setAttendeeStatus(session, 'listening', 'Mandate is ready to transcribe Zoom audio.');
+      setAttendeeStatus(session, 'listening', 'Delegate is ready to transcribe Zoom audio.');
       return;
     }
     if (message.type !== 'TurnInfo') return;
@@ -997,7 +997,7 @@ function forwardMeetingPcm(session, audio) {
 function attendeeAudioConnection(socket, req) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const session = attendeeSessions.get(url.searchParams.get('session_id'));
-  if (!session) return socket.close(1008, 'Unknown Mandate meeting session.');
+  if (!session) return socket.close(1008, 'Unknown Delegate meeting session.');
   if (session.attendeeSocket && session.attendeeSocket !== socket) closeSocket(session.attendeeSocket, 1000, 'A newer Attendee audio connection was established.');
   session.attendeeSocket = socket;
   try { startFluxTranscription(session); }
@@ -1021,7 +1021,7 @@ function attendeeAudioConnection(socket, req) {
     session.audioBytes = (session.audioBytes || 0) + audio.length;
     session.lastAudioAt = Date.now();
     if (session.audioPackets === 1) {
-      setAttendeeStatus(session, 'listening', 'Mandate is receiving and transcribing Zoom audio.');
+      setAttendeeStatus(session, 'listening', 'Delegate is receiving and transcribing Zoom audio.');
     }
     forwardMeetingPcm(session, audio);
   });
@@ -1073,7 +1073,7 @@ async function launchAttendeeMeeting(req, res) {
   const input = JSON.parse((await readBody(req)).toString('utf8'));
   const brief = input.brief || {};
   if (!brief.title || !brief.owner) {
-    const error = new Error('A meeting brief with a title and owner is required before launching Mandate.');
+    const error = new Error('A meeting brief with a title and owner is required before launching Delegate.');
     error.statusCode = 400;
     throw error;
   }
@@ -1086,7 +1086,7 @@ async function launchAttendeeMeeting(req, res) {
     brief,
     meetingUrl,
     botId: null,
-    botName: `Mandate — ${brief.owner}'s delegate`,
+    botName: `Delegate — ${brief.owner}'s representative`,
     status: 'launching',
     statusDetail: 'Creating the Zoom meeting delegate.',
     eventClients: new Set(),
@@ -1128,7 +1128,7 @@ async function launchAttendeeMeeting(req, res) {
     });
     session.botId = bot.id;
     attendeeSessionsByBotId.set(bot.id, session);
-    setAttendeeStatus(session, bot.state || 'joining', 'Mandate is joining the Zoom meeting.');
+    setAttendeeStatus(session, bot.state || 'joining', 'Delegate is joining the Zoom meeting.');
     return send(res, 201, { session: attendeeSessionSnapshot(session) });
   } catch (error) {
     attendeeSessions.delete(session.id);
@@ -1158,14 +1158,14 @@ async function endAttendeeMeeting(sessionId, res) {
   closeSocket(session.attendeeSocket, 1000, 'Meeting ended.');
   session.sttSocket = null;
   session.attendeeSocket = null;
-  setAttendeeStatus(session, 'ended', 'Mandate left the Zoom meeting.');
+  setAttendeeStatus(session, 'ended', 'Delegate left the Zoom meeting.');
   return send(res, 200, { session: attendeeSessionSnapshot(session) });
 }
 
 function attendeeEvents(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const session = attendeeSessions.get(url.searchParams.get('session_id'));
-  if (!session) return send(res, 404, { error: 'Live meeting session not found. Launch Mandate again.' });
+  if (!session) return send(res, 404, { error: 'Live meeting session not found. Launch Delegate again.' });
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
@@ -1185,7 +1185,7 @@ function attendeeEvents(req, res) {
 function attendeeSessionDetails(sessionId, res) {
   const session = attendeeSessions.get(sessionId);
   if (!session) {
-    const error = new Error('Live meeting session not found. Launch Mandate again.');
+    const error = new Error('Live meeting session not found. Launch Delegate again.');
     error.statusCode = 404;
     throw error;
   }
@@ -1293,7 +1293,7 @@ async function report(req, res) {
   const input = JSON.parse((await readBody(req)).toString('utf8'));
   const brief = input.brief || {};
   const reportData = await generateGeminiJson({
-    instruction: `You write concise, factual meeting reports for Mandate. Use only the data provided. Do not add decisions, facts, commitments, or evidence. Return exactly one JSON object with: executive_summary (string, maximum 90 words), decisions (array of strings), owner_actions (array of strings), delegate_position (string), escalation_status (string).`,
+    instruction: `You write concise, factual meeting reports for Delegate. Use only the data provided. Do not add decisions, facts, commitments, or evidence. Return exactly one JSON object with: executive_summary (string, maximum 90 words), decisions (array of strings), owner_actions (array of strings), delegate_position (string), escalation_status (string).`,
     prompt: JSON.stringify({
       meeting: brief.title,
       owner: brief.owner,
@@ -1318,7 +1318,7 @@ async function report(req, res) {
   const name = String(brief.title || 'meeting-report').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'meeting-report';
   return send(res, 200, pdf, {
     'Content-Type': 'application/pdf',
-    'Content-Disposition': `attachment; filename="mandate-${name}-report.pdf"`
+    'Content-Disposition': `attachment; filename="delegate-${name}-report.pdf"`
   });
 }
 
@@ -1385,4 +1385,4 @@ server.on('upgrade', (req, socket, head) => {
   socket.destroy();
 });
 
-server.listen(PORT, process.env.HOST || '127.0.0.1', () => console.log(`Mandate is running at http://localhost:${PORT}`));
+server.listen(PORT, process.env.HOST || '127.0.0.1', () => console.log(`Delegate is running at http://localhost:${PORT}`));

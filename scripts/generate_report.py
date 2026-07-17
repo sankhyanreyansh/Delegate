@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render a Mandate post-meeting report to PDF. Reads JSON from stdin, writes PDF bytes to stdout."""
+"""Render a Delegate post-meeting report to PDF. Reads JSON from stdin, writes PDF bytes to stdout."""
 
 import io
 import json
@@ -45,7 +45,7 @@ def footer(canvas, document):
     canvas.line(0.7 * inch, 0.58 * inch, 7.8 * inch, 0.58 * inch)
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(MUTED)
-    canvas.drawString(0.7 * inch, 0.38 * inch, "MANDATE  |  EVIDENCE-GROUNDED REPRESENTATION RECORD")
+    canvas.drawString(0.7 * inch, 0.38 * inch, "DELEGATE  |  EVIDENCE-GROUNDED REPRESENTATION RECORD")
     canvas.drawRightString(7.8 * inch, 0.38 * inch, f"Page {document.page}")
     canvas.restoreState()
 
@@ -96,7 +96,7 @@ def report_pdf(data):
     document = SimpleDocTemplate(
         output, pagesize=letter, leftMargin=0.7 * inch, rightMargin=0.7 * inch,
         topMargin=0.68 * inch, bottomMargin=0.75 * inch,
-        title="Mandate meeting report", author="Mandate",
+        title="Delegate meeting report", author="Delegate",
     )
 
     brief = data.get("brief") or {}
@@ -168,7 +168,7 @@ def report_pdf(data):
 
     story.append(Paragraph("Representation record", styles["section"]))
     ledger_rows = [[
-        Paragraph("WHEN", styles["label"]), Paragraph("WHAT MANDATE DID", styles["label"]),
+        Paragraph("WHEN", styles["label"]), Paragraph("WHAT DELEGATE DID", styles["label"]),
         Paragraph("EVIDENCE", styles["label"]), Paragraph("OUTCOME", styles["label"]),
     ]]
     if ledger:
@@ -212,7 +212,7 @@ def report_pdf(data):
     if transcript:
         story.append(PageBreak())
         story.append(Paragraph("Transcript appendix", styles["section"]))
-        story.append(Paragraph("The record below captures the meeting conversation and Mandate responses.", styles["small"]))
+        story.append(Paragraph("The record below captures the meeting conversation and Delegate responses.", styles["small"]))
         story.append(Spacer(1, 7))
         for entry in transcript[-80:]:
             speaker = safe(entry.get("speaker") or "Participant")
