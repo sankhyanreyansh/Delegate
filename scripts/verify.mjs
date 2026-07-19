@@ -35,48 +35,50 @@ function run(command, args, input = '') {
   });
 }
 
-async function verifyGemini() {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) return fail('GEMINI_API_KEY is missing from .env');
-  const model = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
+async function verifyOpenAI() {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return fail('OPENAI_API_KEY is missing from .env');
+  const model = process.env.OPENAI_MODEL || 'gpt-5.6-luna';
+  const reasoningEffort = process.env.OPENAI_REASONING_EFFORT || 'none';
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, {
+    const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: 'Return exactly this JSON object: {"status":"ok"}' }] }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseJsonSchema: {
-            type: 'object', additionalProperties: false,
-            properties: { status: { type: 'string', enum: ['ok'] } }, required: ['status']
-          }
-        }
+        model,
+        input: 'Return exactly this JSON object: {"status":"ok"}',
+        reasoning: { effort: reasoningEffort },
+        text: { format: { type: 'json_schema', name: 'provider_verification', strict: true, schema: {
+          type: 'object', additionalProperties: false,
+          properties: { status: { type: 'string', enum: ['ok'] } }, required: ['status']
+        } } }
       })
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error?.message || `HTTP ${response.status}`);
-    const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
+    const text = (data.output || []).flatMap((item) => item.content || [])
+      .filter((part) => part.type === 'output_text').map((part) => part.text || '').join('');
     if (JSON.parse(text).status !== 'ok') throw new Error('Unexpected verification response.');
-    pass(`Gemini ${model} responded correctly`);
-    const embeddingModel = process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-001';
-    const embeddingResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(embeddingModel)}:embedContent`, {
+    pass(`OpenAI ${model} responded correctly with reasoning effort ${reasoningEffort}`);
+    const embeddingModel = process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small';
+    const embeddingDimensions = Number(process.env.OPENAI_EMBEDDING_DIMENSIONS || 768);
+    const embeddingResponse = await fetch('https://api.openai.com/v1/embeddings', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify({
-        model: `models/${embeddingModel}`,
-        taskType: 'RETRIEVAL_DOCUMENT',
-        outputDimensionality: 768,
-        content: { parts: [{ text: 'Mandate verifies source retrieval with semantic embeddings.' }] }
+        model: embeddingModel,
+        input: 'Delegate verifies source retrieval with semantic embeddings.',
+        encoding_format: 'float',
+        dimensions: embeddingDimensions
       })
     });
     const embeddingData = await embeddingResponse.json();
-    if (!embeddingResponse.ok || !Array.isArray(embeddingData.embedding?.values) || embeddingData.embedding.values.length !== 768) {
-      throw new Error(embeddingData.error?.message || 'Gemini embedding verification returned no 768-dimensional vector.');
+    if (!embeddingResponse.ok || !Array.isArray(embeddingData.data?.[0]?.embedding) || embeddingData.data[0].embedding.length !== embeddingDimensions) {
+      throw new Error(embeddingData.error?.message || `OpenAI embedding verification did not return a ${embeddingDimensions}-dimensional vector.`);
     }
-    pass(`Gemini embeddings ${embeddingModel} returned a semantic retrieval vector`);
+    pass(`OpenAI embeddings ${embeddingModel} returned a semantic retrieval vector`);
   } catch (error) {
-    fail(`Gemini check failed: ${error.message}`);
+    fail(`OpenAI check failed: ${error.message}`);
   }
 }
 
@@ -199,9 +201,9 @@ async function verifyDependencies() {
   }
 }
 
-console.log('\nMandate provider verification\n');
+console.log('\nDelegate provider verification\n');
 await verifyDependencies();
-await verifyGemini();
+await verifyOpenAI();
 await verifyDeepgram();
 await verifyFlux();
 await verifyAttendee();

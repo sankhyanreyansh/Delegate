@@ -57,7 +57,7 @@ Attendee Zoom bot ── raw PCM WebSocket ──► Mandate server
                                    Deepgram Flux STT (turn detection)
                                                 │
                                                 ▼
-                         RAG over brief + sources → Gemini decision + verifier
+                       RAG over brief + sources → GPT-5.6 decision + verifier
                                                 │
                                                 ▼
                                    Deepgram Flux TTS (raw PCM)
@@ -68,7 +68,7 @@ Attendee Zoom bot ── raw PCM WebSocket ──► Mandate server
 
 The browser owns local meeting briefs and the dashboard. The Node server keeps
 only active live-session state in memory and coordinates Attendee, Deepgram,
-Gemini, evidence validation, and report generation.
+OpenAI, evidence validation, and report generation.
 
 ## Built with Codex and GPT-5.6
 
@@ -85,12 +85,10 @@ Key product decisions made with Codex:
 - Rehearse edge cases before a delegate enters a meeting.
 - Replace local audio routing with a real hosted Zoom meeting bot.
 
-**Hackathon runtime plan:** GPT-5.6 will replace Gemini for the delegate,
-verification, rehearsal, and report-generation calls before submission. GPT-5.6
-Luna is the intended live-delegate model and GPT-5.6 Sol the intended quality-first
-model for rehearsal and reports. The checked-in implementation currently uses
-`gemini-3.1-flash-lite`, as labelled below; do not claim that the deployed runtime
-uses GPT-5.6 until that migration is complete.
+Delegate uses `gpt-5.6-luna` for PDF text extraction, delegate decisions,
+verification, grounded repairs, rehearsal, and report generation. The current
+configuration uses the `none` reasoning effort to keep every one of these calls
+in the same low-latency class.
 
 ## Run locally
 
@@ -98,7 +96,7 @@ uses GPT-5.6 until that migration is complete.
 
 - Node.js 20+
 - Python 3
-- A Gemini API key for the current runtime
+- An OpenAI API key
 - A Deepgram API key
 - An Attendee account and API key for the real Zoom workflow
 - A public HTTPS address that reaches this Node server for Full Use Mode
@@ -117,7 +115,7 @@ npm install
 For Demo Mode, set at least:
 
 ```dotenv
-GEMINI_API_KEY=your_gemini_key
+OPENAI_API_KEY=your_openai_key
 DEEPGRAM_API_KEY=your_deepgram_key
 REPORT_PYTHON=.venv/bin/python
 ```
@@ -142,7 +140,7 @@ npm start
 
 Open [http://localhost:4242](http://localhost:4242).
 
-`npm run verify` additionally checks Gemini, Deepgram browser models, Deepgram Flux
+`npm run verify` additionally checks OpenAI, Deepgram browser models, Deepgram Flux
 connections, Attendee configuration, and the PDF renderer. Run it after every key
 and public URL is configured.
 
@@ -221,7 +219,7 @@ export the PDF from **Commitment ledger**.
 
 ```text
 public/                 Browser dashboard, landing page, styles, and assets
-server.mjs              Gemini, retrieval, verification, Attendee, Deepgram, PDF APIs
+server.mjs              OpenAI, retrieval, verification, Attendee, Deepgram, PDF APIs
 scripts/generate_report.py
                         PDF renderer
 scripts/verify.mjs      Provider/configuration checks
@@ -235,13 +233,13 @@ scripts/verify.mjs      Provider/configuration checks
 - The MVP targets Zoom only.
 - Attendee may need to be admitted through a waiting room.
 - The owner remains responsible for approvals and consequential decisions.
-- Sources and meeting content are sent to Gemini and Deepgram when those services
+- Sources and meeting content are sent to OpenAI and Deepgram when those services
   are used; review organisational consent and data-handling requirements before
   using real meetings.
 
 ## Submission checklist
 
-- [ ] Migrate all Gemini runtime calls to GPT-5.6 and update this README accurately.
+- [x] Use GPT-5.6 Luna for all model-generation calls and OpenAI embeddings for retrieval.
 - [ ] Record a public under-three-minute demo: brief → rehearsal → Zoom join →
   grounded answer → deferral → PDF record.
 - [ ] Add the public deployment/demo URL and repository URL to Devpost.

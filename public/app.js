@@ -457,7 +457,7 @@ async function askDelegate(question, transcriptText = question) {
   if (!brief || !question?.trim() || ui.thinking) return;
   addTranscript(brief, { speaker: 'Meeting participant', initials: 'MP', text: String(transcriptText || question).trim(), type: 'other' });
   ui.thinking = true; render();
-  let result; let provider = 'gemini';
+  let result; let provider = 'openai';
   try {
     const response = await fetch('/api/delegate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ brief, transcript: brief.transcript, question }) });
     if (!response.ok) throw new Error((await response.json()).error || 'Delegate service is unavailable.');
