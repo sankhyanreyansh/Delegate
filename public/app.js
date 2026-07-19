@@ -752,7 +752,7 @@ async function exportLedger() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `mandate-${brief.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'meeting'}-report.pdf`;
+    anchor.download = `delegate-${brief.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'meeting'}-report.pdf`;
     document.body.appendChild(anchor); anchor.click(); anchor.remove();
     URL.revokeObjectURL(url);
     toast('PDF report downloaded', 'The report includes the decisions, evidence trail, and transcript appendix.');
