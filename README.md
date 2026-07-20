@@ -1,8 +1,8 @@
 # Delegate
 
-> An AI meeting agent you can trust to represent your position: evidence-backed answers, clear authority boundaries, and real-time deferrals when approval is needed.
+> An AI meeting representative that can answer from evidence, present a live browser, and defer when approval is needed.
 
-Delegate joins Zoom meetings, listens and speaks in real time, and represents the user's prepared position. Before a meeting, users create a brief with goals, authority limits, and reference documents. During the call, Delegate retrieves supporting evidence, always cites it for substantive answers, and defers commitments that require the owner's decision. A live transcript, and downloadable report make each outcome inspectable.
+Delegate joins Zoom meetings, listens and speaks in real time, and represents the user's prepared position. Before a meeting, users create a brief with goals, authority limits, and reference documents. During the call, Delegate retrieves supporting evidence, cites substantive answers, and defers commitments that require the owner's decision. When enabled in the brief, it can also operate a controlled virtual browser to visibly navigate pages, documentation, and workflows in real time. A live transcript and downloadable report make each outcome inspectable.
 
 ## Built with
 
@@ -10,7 +10,7 @@ Delegate joins Zoom meetings, listens and speaks in real time, and represents th
 - **OpenAI embeddings** for semantic retrieval over meeting references.
 - **Deepgram Flux** for low-latency real-time speech-to-text and text-to-speech in both Demo and Zoom modes.
 - **Attendee.dev** for bidirectional Zoom participation.
-- **Browserbase + Stagehand** for opt-in, GPT-5.6-powered live browser walkthroughs and screen sharing in Zoom.
+- **Browserbase + Stagehand** for opt-in, GPT-5.6-powered live browser walkthroughs presented through Delegate's Zoom video.
 - **JavaScript + Node.js** for the full-stack application.
 
 ## Run locally
@@ -19,7 +19,8 @@ Delegate joins Zoom meetings, listens and speaks in real time, and represents th
 
 - Node.js 20.19+
 - Python 3
-- OpenAI and Deepgram API keys
+- OpenAI, Deepgram, and Browserbase API keys
+- A Browserbase project ID for live browser presentation
 - Attendee.dev credentials for Zoom mode
 
 ```bash
@@ -35,9 +36,9 @@ npm start
 
 Open [http://localhost:4242](http://localhost:4242).
 
-For **Interactive Demo Mode**, set `OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, and `REPORT_PYTHON=.venv/bin/python` in `.env`. To start the live browser presentation in the demo, also set `BROWSERBASE_API_KEY`.
+For **Interactive Demo Mode**, set `OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`, and `REPORT_PYTHON=.venv/bin/python` in `.env`.
 
-For **Zoom Mode**, also set `ATTENDEE_API_KEY`, `ATTENDEE_WEBHOOK_SECRET`, and a public HTTPS `PUBLIC_BASE_URL`. When a meeting brief has **Enable Delegate’s live browser presentation** turned on, set `BROWSERBASE_API_KEY` (and `BROWSERBASE_PROJECT_ID` if your key does not imply a project). See `.env.example` for all configuration options. Never commit `.env`.
+For **Zoom Mode**, also set `ATTENDEE_API_KEY`, `ATTENDEE_WEBHOOK_SECRET`, and a public HTTPS `PUBLIC_BASE_URL`. Browser presentation uses the same Delegate video session rather than a separate native Zoom screen-share stream. See `.env.example` for all configuration options. Never commit `.env`.
 
 No external sample data is required: create a brief and add a text reference directly in the app. Run `npm run verify` after configuring providers to verify OpenAI, Deepgram, Attendee, and PDF reporting.
 
