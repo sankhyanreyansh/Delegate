@@ -881,7 +881,7 @@ function browserSessionSnapshot(session) {
     // avoids routing the interactive stream through an extra local iframe.
     liveViewUrl: session.liveViewUrl || null,
     presentationVisible: Boolean(session.presentationVisible),
-    currentUrl: session.page?.url?.() || 'about:blank',
+    currentUrl: session.currentUrl || session.page?.url?.() || 'about:blank',
     startedAt: session.startedAt,
     lastAction: session.lastAction || null
   };
@@ -892,18 +892,6 @@ function voiceAgentPageUrl(session) {
   return publicPageUrl('/voice-agent.html', {
     session_id: session.id,
     owner: String(session.brief?.owner || 'Meeting owner').slice(0, 160)
-  });
-}
-
-function screenSharePageUrl(session) {
-  if (!session?.browserSession) throw new Error('A browser session is required for the screen-share page.');
-  return publicPageUrl('/screen-share.html', {
-    session_id: session.id,
-    browser_session_id: session.browserSession.id,
-    // Attendee treats a changed URL as a new share source. A fresh nonce makes
-    // every explicit “start sharing” request load the dedicated browser page,
-    // rather than retaining a stopped or cached capture from an earlier share.
-    share_id: String(session.screenShareVersion || 0)
   });
 }
 
@@ -1002,6 +990,8 @@ async function createBrowserPresentation({ brief = {}, meetingSessionId = null }
       // chosen tab identity so normal navigation/scrolling never remounts the
       // streamed iframe, while a genuine new tab updates both Zoom and app.
       liveViewPage: page,
+      liveViewPageUrl: normalizeBrowserUrl(page.url()),
+      currentUrl: normalizeBrowserUrl(page.url()),
       brief,
       meetingSessionId,
       status: 'ready',
@@ -1027,28 +1017,62 @@ async function releaseBrowserPresentation(sessionOrId) {
   try { await session.stagehand?.close({ force: true }); } catch { /* Closing an already-ended remote browser is safe. */ }
 }
 
-function browserPage(session) {
-  const page = session?.stagehand?.context?.activePage() || session?.stagehand?.context?.pages?.()[0] || session?.page;
+function normalizeBrowserUrl(value) {
+  try { return new URL(String(value || '')).href; }
+  catch { return String(value || ''); }
+}
+
+function browserContextPages(session) {
+  const pages = session?.stagehand?.context?.pages?.();
+  return Array.isArray(pages) ? pages.filter(Boolean) : [];
+}
+
+function browserPage(session, preferredUrl = '') {
+  const pages = browserContextPages(session);
+  const targetUrl = normalizeBrowserUrl(preferredUrl);
+  const page = (targetUrl && pages.find((candidate) => normalizeBrowserUrl(candidate.url?.()) === targetUrl))
+    || session?.stagehand?.context?.activePage()
+    || pages.at(-1)
+    || session?.page;
   if (!page) throw new Error('The shared browser session is no longer available.');
   session.page = page;
   return page;
 }
 
-async function refreshBrowserLiveView(session) {
-  const activePage = session.stagehand?.context?.activePage() || session.stagehand?.context?.pages?.().at(-1) || session.page;
-  if (activePage) session.page = activePage;
+function finalAgentPageUrl(result) {
+  const actions = Array.isArray(result?.actions) ? result.actions : [];
+  const messageUrls = String(result?.message || '').match(/https?:\/\/[^\s),]+/gi) || [];
+  const candidates = [
+    result?.finalUrl,
+    result?.url,
+    ...actions.slice().reverse().flatMap((action) => [
+      action?.pageUrl,
+      action?.url,
+      action?.metadata?.pageUrl,
+      action?.result?.pageUrl
+    ]),
+    ...messageUrls
+  ];
+  return candidates.find((value) => typeof value === 'string' && /^https?:/i.test(value)) || '';
+}
+
+async function refreshBrowserLiveView(session, { preferredUrl = '' } = {}) {
+  const activePage = browserPage(session, preferredUrl);
+  const activeUrl = normalizeBrowserUrl(preferredUrl || activePage.url?.());
   // Browserbase's debuggerFullscreenUrl is a session-level, live stream. It
   // already follows navigation, clicks, and scrolls. Re-requesting it after
   // every action can issue a new signed URL, which remounts an iframe in the
   // app/Zoom container and makes the stream appear to flicker or fall behind.
-  if (session.liveViewUrl && session.liveViewPage === activePage) return;
+  if (session.liveViewUrl && session.liveViewPage === activePage && session.liveViewPageUrl === activeUrl) return;
   const liveView = await session.client.sessions.debug(session.browserbaseId);
-  const liveViewUrl = liveView.pages?.find((candidate) => candidate.url === activePage?.url?.())?.debuggerFullscreenUrl
+  const liveViewUrl = liveView.pages?.find((candidate) => normalizeBrowserUrl(candidate.url) === activeUrl)?.debuggerFullscreenUrl
     || liveView.debuggerFullscreenUrl
     || liveView.pages?.[0]?.debuggerFullscreenUrl;
   if (!liveViewUrl) throw new Error('Browserbase did not return a live view for the active shared browser tab.');
   session.liveViewUrl = liveViewUrl;
   session.liveViewPage = activePage;
+  session.liveViewPageUrl = activeUrl;
+  session.currentUrl = activeUrl;
 }
 
 async function planBrowserTask({ question, browserAvailable }) {
@@ -1112,7 +1136,11 @@ async function runBrowserAgent({ browserSession, brief, task }) {
   if (!result.success || !result.completed) {
     throw new Error(result.message || 'Stagehand did not complete the requested browser workflow.');
   }
-  await refreshBrowserLiveView(browserSession);
+  // Stagehand may leave the requested site in a newly opened tab while its
+  // context's activePage still points at the earlier Google/search tab. The
+  // result carries the final page URL, so use it to point both Live View
+  // consumers (the app and the Zoom video page) at the tab the agent finished.
+  await refreshBrowserLiveView(browserSession, { preferredUrl: finalAgentPageUrl(result) });
   const action = {
     action: 'agent',
     detail: String(result.message || 'browser walkthrough').slice(0, 280),
@@ -1127,21 +1155,13 @@ async function setMeetingScreenShare(session, presentation) {
   if (!session?.voiceAgentMode || !session.botId || !session.browserSession) return;
   const shouldShare = presentation === 'show';
   if (presentation === 'unchanged' || session.screenShareActive === shouldShare) return;
-  if (shouldShare) {
-    session.screenShareVersion = (session.screenShareVersion || 0) + 1;
-    await attendeeRequest(`/bots/${encodeURIComponent(session.botId)}/voice_agent_settings`, {
-      method: 'PATCH',
-      // This is intentionally a different page from the voice-agent URL. The
-      // voice page owns Delegate's camera and microphone; this page contains
-      // only Browserbase Live View, which Attendee captures as Zoom content.
-      body: JSON.stringify({ screenshare_url: screenSharePageUrl(session) })
-    });
-  } else {
-    await attendeeRequest(`/bots/${encodeURIComponent(session.botId)}/voice_agent_settings`, {
-      method: 'PATCH',
-      body: JSON.stringify({ screenshare_url: '' })
-    });
-  }
+  // Attendee's API treats `url` (voice-agent audio/video) and
+  // `screenshare_url` as mutually exclusive. Patching the latter onto a live
+  // voice agent therefore cannot create a second stream. Keep the one
+  // supported voice-agent page mounted and let it switch its video surface
+  // between Delegate's identity and Browserbase Live View instead. That keeps
+  // microphone capture, transcription, speech, and the visible browser in a
+  // single bot and makes turning presentation on/off instant.
   session.screenShareActive = shouldShare;
   session.browserSession.presentationVisible = shouldShare;
   emitAttendeeEvent(session, {
@@ -1152,11 +1172,10 @@ async function setMeetingScreenShare(session, presentation) {
 }
 
 function waitForScreenShareMount() {
-  // Give Attendee's dedicated screen-share container a moment to fetch the
-  // Browserbase Live View before Stagehand begins navigating. That keeps the
-  // page load, clicks, and scrolling visible in Zoom rather than racing ahead
-  // in the app-only preview.
-  return new Promise((resolve) => setTimeout(resolve, 650));
+  // The already-loaded voice-agent page polls the presentation state. Give it
+  // a short moment to mount Browserbase before the first navigation so Zoom
+  // sees the complete workflow, not only its final page.
+  return new Promise((resolve) => setTimeout(resolve, 700));
 }
 
 async function runMeetingBrowserAction(session, browserPlan) {
@@ -1168,8 +1187,8 @@ async function runMeetingBrowserAction(session, browserPlan) {
       ? 'show'
       : (browserPlan.presentation === 'hide' ? 'hide' : (browserPlan.presentation === 'show' ? 'show' : 'unchanged'));
     if (presentation === 'show' && !session.screenShareActive) {
-      // Set this before the provider opens the screenshare page. Its first
-      // state poll will therefore load the same Live View URL used by the app.
+      // Set this before the voice-agent page mounts Browserbase. Its first
+      // state poll then loads the same Live View URL used by the app.
       session.browserSession.presentationVisible = true;
       try {
         await setMeetingScreenShare(session, 'show');
@@ -1548,9 +1567,9 @@ async function launchAttendeeMeeting(req, res) {
       setAttendeeStatus(session, 'preparing_browser', 'Starting Delegate’s shared browser.');
       session.browserSession = await createBrowserPresentation({ brief, meetingSessionId: session.id });
     }
-    // For browser-enabled Zoom meetings, Attendee loads a dedicated voice page
-    // for Delegate's microphone/video. Browser screen sharing is attached later
-    // as a separate page, so the two media streams never compete.
+    // For browser-enabled Zoom meetings, Attendee loads one voice-agent page.
+    // Its audio transport stays live throughout the meeting; its video surface
+    // switches to Browserbase only while Delegate is presenting.
     const botSettings = session.browserSession
       ? {
           zoom_settings: { sdk: 'web' },

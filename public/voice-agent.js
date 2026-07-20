@@ -1,18 +1,55 @@
 const sessionId = new URLSearchParams(location.search).get('session_id');
 const owner = new URLSearchParams(location.search).get('owner');
 const agentName = document.getElementById('agent-name');
+const identity = document.getElementById('identity');
+const presentation = document.getElementById('presentation');
+const browserFrame = document.getElementById('browser-frame');
 let stream;
 let context;
 let source;
 let processor;
 let socket;
 let processingTurn = false;
+let browserFrameUrl = '';
+let presentationSyncTimer;
 
 function setStatus(message, error = false) {
-  // This page is deliberately only the bot's video and audio transport. Screen
-  // sharing uses /screen-share.html, so it can never replace the video view.
+  // Attendee captures this page for the bot's single audio/video stream. The
+  // visible surface can switch to Browserbase without disrupting its microphone.
   void message;
   void error;
+}
+
+async function syncBrowserPresentation() {
+  if (!sessionId || !identity || !presentation || !browserFrame) return;
+  try {
+    const response = await fetch(`/api/meetings/${encodeURIComponent(sessionId)}/screen-state`, { cache: 'no-store' });
+    if (!response.ok) throw new Error('The live browser session is unavailable.');
+    const state = await response.json();
+    const visible = state.presentationVisible === true && Boolean(state.liveViewUrl);
+    identity.hidden = visible;
+    presentation.classList.toggle('visible', visible);
+    if (visible && browserFrameUrl !== state.liveViewUrl) {
+      browserFrame.src = state.liveViewUrl;
+      browserFrameUrl = state.liveViewUrl;
+    }
+    if (!visible && browserFrameUrl) {
+      browserFrame.removeAttribute('src');
+      browserFrameUrl = '';
+    }
+  } catch {
+    // The page can begin loading before the meeting record is available. Keep
+    // Delegate's identity visible and retry on the next regular poll.
+    identity.hidden = false;
+    presentation.classList.remove('visible');
+  }
+}
+
+function scheduleBrowserPresentationSync(delay = 450) {
+  window.clearTimeout(presentationSyncTimer);
+  presentationSyncTimer = window.setTimeout(() => {
+    void syncBrowserPresentation().finally(() => scheduleBrowserPresentationSync(850));
+  }, delay);
 }
 
 function pcm16Frame(samples, sourceSampleRate, targetSampleRate = 16000) {
@@ -104,11 +141,14 @@ async function start() {
   socket.onmessage = (event) => handleTranscription(event.data);
   socket.onerror = () => setStatus('Meeting transcription connection failed', true);
   socket.onclose = () => setStatus('Meeting audio connection closed', true);
+  void syncBrowserPresentation();
+  scheduleBrowserPresentationSync(300);
 }
 
 void start().catch((error) => setStatus(error.message || 'Delegate voice agent could not start.', true));
 
 window.addEventListener('pagehide', () => {
+  window.clearTimeout(presentationSyncTimer);
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'CloseStream' }));
   stream?.getTracks().forEach((track) => track.stop());
   if (context?.state !== 'closed') void context.close();
