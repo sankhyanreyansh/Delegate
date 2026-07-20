@@ -1,49 +1,15 @@
 const sessionId = new URLSearchParams(location.search).get('session_id');
-const browserSessionId = new URLSearchParams(location.search).get('browser_session_id');
 const status = document.getElementById('status');
-const browserPresentation = document.getElementById('browser-presentation');
-const browserFrame = document.getElementById('browser-frame');
 let stream;
 let context;
 let source;
 let processor;
 let socket;
 let processingTurn = false;
-let browserFrameUrl = '';
-let lastPresentationVisible = null;
 
 function setStatus(message, error = false) {
   status.classList.toggle('error', error);
   status.lastElementChild.textContent = message;
-}
-
-function setBrowserPresentationVisible(visible, presentationUrl = '') {
-  // Preload Browserbase's direct Live View while Delegate is listening. That
-  // lets Zoom switch to an already-connected virtual browser instead of
-  // briefly sharing this page while the browser stream starts.
-  if (browserFrame && presentationUrl && browserFrameUrl !== presentationUrl) {
-    browserFrame.src = presentationUrl;
-    browserFrameUrl = presentationUrl;
-  }
-  if (lastPresentationVisible === visible) return;
-  lastPresentationVisible = visible;
-  document.body.classList.toggle('presenting', visible);
-  browserPresentation?.setAttribute('aria-hidden', String(!visible));
-}
-
-async function syncBrowserPresentation() {
-  if (!sessionId || !browserSessionId) return;
-  try {
-    const response = await fetch(`/api/meetings/${encodeURIComponent(sessionId)}/screen-state`, { cache: 'no-store' });
-    if (!response.ok) return;
-    const state = await response.json();
-    // Only ever share Browserbase's direct Live View here. The local
-    // presentation wrapper exists for backwards-compatible links in the app,
-    // but adding that extra iframe to Zoom caused stale loading screens.
-    setBrowserPresentationVisible(Boolean(state.presentationVisible && state.liveViewUrl), state.liveViewUrl || '');
-  } catch {
-    // Audio remains independent of the visual presentation state.
-  }
 }
 
 function pcm16Frame(samples, sourceSampleRate, targetSampleRate = 16000) {
@@ -134,8 +100,6 @@ async function start() {
   socket.onmessage = (event) => handleTranscription(event.data);
   socket.onerror = () => setStatus('Meeting transcription connection failed', true);
   socket.onclose = () => setStatus('Meeting audio connection closed', true);
-  void syncBrowserPresentation();
-  if (browserSessionId) window.setInterval(() => void syncBrowserPresentation(), 1000);
 }
 
 void start().catch((error) => setStatus(error.message || 'Delegate voice agent could not start.', true));
