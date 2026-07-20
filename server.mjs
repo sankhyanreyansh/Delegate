@@ -659,11 +659,14 @@ async function tts(req, res) {
     error.statusCode = 400;
     throw error;
   }
-  const params = new URLSearchParams({
-    model: process.env.DEEPGRAM_BROWSER_TTS_MODEL || 'aura-2-thalia-en',
-    encoding: 'mp3'
-  });
-  const response = await fetch(`https://api.deepgram.com/v1/speak?${params}`, {
+  const model = process.env.DEEPGRAM_BROWSER_TTS_MODEL || 'flux-alexis-en';
+  if (!model.startsWith('flux-')) {
+    const error = new Error('DEEPGRAM_BROWSER_TTS_MODEL must be a Deepgram Flux voice.');
+    error.statusCode = 409;
+    throw error;
+  }
+  const params = new URLSearchParams({ model, encoding: 'mp3' });
+  const response = await fetch(`https://api.deepgram.com/v2/speak?${params}`, {
     method: 'POST',
     headers: { 'Authorization': `Token ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ text: String(text).slice(0, 3000) })
@@ -1206,22 +1209,20 @@ liveTranscription.on('connection', (browserSocket) => {
     browserSocket.close(1011, 'Deepgram is not configured');
     return;
   }
-  const sttModel = process.env.DEEPGRAM_BROWSER_STT_MODEL || 'nova-3';
+  const sttModel = process.env.DEEPGRAM_BROWSER_STT_MODEL || 'flux-general-en';
+  if (!sttModel.startsWith('flux-')) {
+    browserSocket.send(JSON.stringify({ type: 'Error', message: 'DEEPGRAM_BROWSER_STT_MODEL must be a Deepgram Flux model.' }));
+    browserSocket.close(1011, 'Browser transcription model must use Flux');
+    return;
+  }
   const params = new URLSearchParams({
     model: sttModel,
-    language: 'en-US',
-    smart_format: 'true',
-    punctuate: 'true',
-    interim_results: 'true',
-    endpointing: '250',
-    utterance_end_ms: '1000',
-    vad_events: 'true'
+    encoding: 'linear16',
+    sample_rate: '16000',
+    eot_threshold: process.env.DEEPGRAM_EOT_THRESHOLD || '0.7',
+    eot_timeout_ms: process.env.DEEPGRAM_EOT_TIMEOUT_MS || '1800'
   });
-  if (sttModel.startsWith('nova-3')) {
-    const keyterms = [...new Set((process.env.DEEPGRAM_KEYTERMS || 'Delegate').split(',').map((term) => term.trim()).filter(Boolean))];
-    for (const term of keyterms) params.append('keyterm', term);
-  }
-  const deepgramSocket = new WebSocket(`wss://api.deepgram.com/v1/listen?${params}`, {
+  const deepgramSocket = new WebSocket(`wss://api.deepgram.com/v2/listen?${params}`, {
     headers: { Authorization: `Token ${apiKey}` }
   });
   const pendingAudio = [];
@@ -1238,7 +1239,6 @@ liveTranscription.on('connection', (browserSocket) => {
   deepgramSocket.on('open', () => {
     downstreamOpen = true;
     for (const audio of pendingAudio.splice(0)) deepgramSocket.send(audio, { binary: true });
-    browserSocket.send(JSON.stringify({ type: 'Ready' }));
   });
   deepgramSocket.on('message', (data) => {
     if (browserSocket.readyState === WebSocket.OPEN) browserSocket.send(data.toString());

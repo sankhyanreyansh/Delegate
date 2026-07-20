@@ -8,7 +8,7 @@ Delegate joins Zoom meetings, listens and speaks in real time, and represents th
 
 - **GPT-5.6 Luna** for grounded responses, authority checks, rehearsal, and reports.
 - **OpenAI embeddings** for semantic retrieval over meeting references.
-- **Deepgram** for real-time speech-to-text and text-to-speech.
+- **Deepgram Flux** for low-latency real-time speech-to-text and text-to-speech in both Demo and Zoom modes.
 - **Attendee.dev** for bidirectional Zoom participation.
 - **JavaScript + Node.js** for the full-stack application.
 
@@ -23,7 +23,7 @@ Delegate joins Zoom meetings, listens and speaks in real time, and represents th
 
 ```bash
 git clone https://github.com/sankhyanreyansh/Delegate.git
-cd Mandate
+cd Delegate
 cp .env.example .env
 python3 -m venv .venv
 .venv/bin/python -m pip install reportlab

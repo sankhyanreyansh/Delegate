@@ -85,11 +85,11 @@ async function verifyOpenAI() {
 async function verifyDeepgram() {
   const key = process.env.DEEPGRAM_API_KEY;
   if (!key) return fail('DEEPGRAM_API_KEY is missing from .env');
-  const ttsModel = process.env.DEEPGRAM_BROWSER_TTS_MODEL || 'aura-2-thalia-en';
-  const sttModel = process.env.DEEPGRAM_BROWSER_STT_MODEL || 'nova-3';
+  const ttsModel = process.env.DEEPGRAM_BROWSER_TTS_MODEL || 'flux-alexis-en';
+  if (!ttsModel.startsWith('flux-')) return fail('DEEPGRAM_BROWSER_TTS_MODEL must be a Flux voice for Demo Mode.');
   try {
-    const speech = 'This is a clear speech to text verification sentence for the Mandate meeting delegate.';
-    const response = await fetch(`https://api.deepgram.com/v1/speak?model=${encodeURIComponent(ttsModel)}&encoding=linear16&container=wav`, {
+    const speech = 'This is a clear speech synthesis verification sentence for the Delegate meeting representative.';
+    const response = await fetch(`https://api.deepgram.com/v2/speak?model=${encodeURIComponent(ttsModel)}&encoding=mp3`, {
       method: 'POST',
       headers: { Authorization: `Token ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: speech })
@@ -97,18 +97,7 @@ async function verifyDeepgram() {
     const audio = Buffer.from(await response.arrayBuffer());
     if (!response.ok) throw new Error(audio.toString('utf8') || `HTTP ${response.status}`);
     if (audio.length < 100) throw new Error('Deepgram returned an empty audio response.');
-    pass(`Deepgram TTS ${ttsModel} returned audio`);
-
-    const transcriptResponse = await fetch(`https://api.deepgram.com/v1/listen?model=${encodeURIComponent(sttModel)}&smart_format=true`, {
-      method: 'POST',
-      headers: { Authorization: `Token ${key}`, 'Content-Type': 'audio/wav' },
-      body: audio
-    });
-    const transcriptData = await transcriptResponse.json();
-    if (!transcriptResponse.ok) throw new Error(transcriptData.err_msg || transcriptData.error_message || `HTTP ${transcriptResponse.status}`);
-    const transcript = transcriptData.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
-    if (!/mandate/i.test(transcript)) throw new Error(`Unexpected transcript: ${transcript || '(empty)'}`);
-    pass(`Deepgram STT ${sttModel} transcribed the generated audio`);
+    pass(`Deepgram Flux Demo TTS ${ttsModel} returned audio`);
   } catch (error) {
     fail(`Deepgram check failed: ${error.message}`);
   }
@@ -142,13 +131,18 @@ function verifyFluxSocket(url, label) {
 async function verifyFlux() {
   const key = process.env.DEEPGRAM_API_KEY;
   if (!key) return;
-  const sttModel = process.env.DEEPGRAM_STT_MODEL || 'flux-general-en';
+  const sttModels = [...new Set([
+    process.env.DEEPGRAM_STT_MODEL || 'flux-general-en',
+    process.env.DEEPGRAM_BROWSER_STT_MODEL || 'flux-general-en'
+  ])];
   const ttsModel = process.env.DEEPGRAM_TTS_MODEL || 'flux-alexis-en';
-  if (!sttModel.startsWith('flux-')) return fail('DEEPGRAM_STT_MODEL must be a Flux model for the Attendee Zoom bot.');
+  if (sttModels.some((model) => !model.startsWith('flux-'))) return fail('DEEPGRAM_STT_MODEL and DEEPGRAM_BROWSER_STT_MODEL must be Flux models.');
   if (!ttsModel.startsWith('flux-')) return fail('DEEPGRAM_TTS_MODEL must be a Flux voice for the Attendee Zoom bot.');
   try {
-    await verifyFluxSocket(`wss://api.deepgram.com/v2/listen?model=${encodeURIComponent(sttModel)}&encoding=linear16&sample_rate=16000`, `Flux STT ${sttModel}`);
-    pass(`Deepgram Flux STT ${sttModel} accepted a live connection`);
+    for (const sttModel of sttModels) {
+      await verifyFluxSocket(`wss://api.deepgram.com/v2/listen?model=${encodeURIComponent(sttModel)}&encoding=linear16&sample_rate=16000`, `Flux STT ${sttModel}`);
+      pass(`Deepgram Flux STT ${sttModel} accepted a live connection`);
+    }
     await verifyFluxSocket(`wss://api.deepgram.com/v2/speak?model=${encodeURIComponent(ttsModel)}&encoding=linear16&sample_rate=16000`, `Flux TTS ${ttsModel}`);
     pass(`Deepgram Flux TTS ${ttsModel} accepted a live connection`);
   } catch (error) {

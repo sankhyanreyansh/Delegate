@@ -47,7 +47,7 @@ function loadState() {
 let state = loadState();
 let ui = {
   view: 'overview', modal: null, activeBriefId: state.briefs[0]?.id, health: null, thinking: false,
-  listening: false, pendingSources: [], referenceDrafts: [], briefDraft: null, mediaRecorder: null, micStream: null,
+  listening: false, pendingSources: [], referenceDrafts: [], briefDraft: null, micStream: null, audioContext: null, audioSource: null, audioProcessor: null,
   liveSocket: null, finalTranscriptParts: [], liveInterim: '', lastProvider: 'not connected',
   audioInputs: [], audioInputId: localStorage.getItem('mandate-listening-source') || '', citationExcerpt: null,
   rehearsal: null, returnModal: null, mode: localStorage.getItem(MODE_KEY) || null, briefMenuId: null,
@@ -93,46 +93,84 @@ function clearLiveDelegateSession() {
   persist();
 }
 
+function demoBrief() {
+  return {
+    id: 'delegate-demo-brief',
+    title: 'Product launch decision',
+    owner: 'Alex Rivera',
+    attendees: 'Product leadership',
+    meetingTime: 'Today · 11:00 AM',
+    status: 'Ready',
+    zoomUrl: '',
+    attendeeSession: null,
+    goals: 'Align on the next launch decision without creating an unsupported commitment.',
+    position: 'Protect reliability before making a launch commitment. Engineering must estimate and mitigate remaining incident risks first.',
+    tone: 'Clear, constructive, and professional.',
+    authority: [
+      'Recommend resolving reliability risks first.',
+      'Ask for an engineering estimate.',
+      'Clarify the current approval path.'
+    ],
+    escalation: [
+      'A revised launch commitment.',
+      'New budget or spending.',
+      'A contractual commitment.'
+    ],
+    sources: [
+      { id: 'SRC-DEMO-POSITION', name: 'Owner meeting position', kind: 'Position statement', text: 'Protect reliability before making a launch commitment. Engineering must estimate and mitigate remaining incident risks first.' },
+      { id: 'SRC-DEMO-PRIORITIES', name: 'Product priorities', kind: 'Approved reference', text: 'Reliability is the first priority for the current release. The engineering team must estimate and mitigate outstanding incident risks before leadership commits to a launch date.' }
+    ],
+    transcript: []
+  };
+}
+
+function openDemo() {
+  stopAttendeeEvents();
+  setMode('demo');
+  let brief = state.briefs.find((item) => item.id === 'delegate-demo-brief');
+  if (!brief) {
+    brief = demoBrief();
+    state.briefs.unshift(brief);
+  }
+  if (!state.profile.name) state.profile = { name: brief.owner, initials: initialsFor(brief.owner) };
+  ui.activeBriefId = brief.id;
+  ui.view = 'live';
+  ui.modal = null;
+  ui.editingBriefId = null;
+  ui.pendingSources = [];
+  ui.referenceDrafts = [];
+  ui.briefDraft = null;
+  persist();
+  render();
+}
+
 function renderLanding() {
   return `<main class="landing landing-simple">
     <nav class="simple-nav" aria-label="Delegate">
       <div class="simple-brand"><span class="landing-logo"><img src="/assets/logo.png" alt="Delegate" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"/><span class="landing-logo-fallback">D</span></span><span>Delegate</span></div>
-      <a class="simple-github" href="https://github.com/sankhyanreyansh/Mandate" target="_blank" rel="noreferrer">GitHub ${icon('arrow')}</a>
+      <a class="simple-github" href="https://github.com/sankhyanreyansh/Delegate" target="_blank" rel="noreferrer">GitHub ${icon('arrow')}</a>
     </nav>
 
-    <section class="simple-hero">
-      <div class="eyebrow">AI meeting representative</div>
-      <h1>Your position,<br/>present with proof.</h1>
-      <p>Delegate represents you in meetings using your brief, your sources, and the authority you set.</p>
-      <div class="simple-actions"><button class="button primary" data-action="choose-demo">Try the interactive demo ${icon('arrow')}</button><button class="button ghost" data-action="choose-full">Use with Zoom</button></div>
+    <section class="delegate-hero">
+      <div class="delegate-hero-copy"><div class="eyebrow">AI meeting representative</div><h1>Your position,<br/><em>present in the room.</em></h1><p>Delegate joins the call when you cannot. It answers from your brief, stays within your authority, and leaves every important decision accountable.</p><div class="simple-actions"><button class="button primary" data-action="choose-demo">Open live demo ${icon('arrow')}</button><button class="button ghost" data-action="choose-full">Use with Zoom</button></div></div>
+      <div class="delegate-live-preview" aria-label="Example of Delegate protecting a decision in a live meeting"><div class="preview-header"><span><i></i> LIVE MEETING</span><b>Product launch decision</b><span>12:04</span></div><div class="preview-brief"><div><small>OWNER POSITION</small><b>Reliability before launch</b></div><span>BRIEF READY</span></div><div class="preview-conversation"><div class="preview-question"><small>MEETING PARTICIPANT</small><p>Can we commit to launching next month?</p></div><div class="preview-answer"><div class="preview-answer-heading"><span>D</span><small>DELEGATE</small><b>CHECKED THE BRIEF</b></div><p>Not yet. Engineering still needs to estimate and mitigate the remaining reliability risks before leadership commits to a launch date.</p><div class="preview-evidence"><span>${icon('brief')} Product priorities</span><span>${icon('shield')} Approval required</span></div></div></div><div class="preview-outcome"><span>${icon('shield')}</span><div><b>Commitment protected</b><small>Delegate cited the brief and deferred the decision.</small></div><em>LOGGED</em></div></div>
     </section>
 
-    <section class="simple-section simple-value">
-      <div class="simple-section-intro"><div class="eyebrow">Why Delegate</div><h2>A representative that shows its work.</h2></div>
-      <div class="value-list">
-        <article><span>01</span><h3>Transparent decisions</h3><p>Every answer is shown as answered, cited, deferred, or escalated—so the meeting never becomes a black box.</p></article>
-        <article><span>02</span><h3>Rehearse before you delegate</h3><p>Pressure-test the brief against likely questions, then refine the boundaries before the call begins.</p></article>
-        <article><span>03</span><h3>Defers in real time</h3><p>When a request exceeds your authority, Delegate pauses instead of guessing or making a commitment for you.</p></article>
+    <section class="delegate-principles">
+      <div class="delegate-section-heading"><div class="eyebrow">Built for trust</div><h2>It knows when not to act.</h2></div>
+      <div class="delegate-principle-grid">
+        <article><span>01</span><h3>Evidence first</h3><p>For substantive questions, Delegate retrieves the relevant brief and reference material before it responds.</p></article>
+        <article><span>02</span><h3>Authority aware</h3><p>It can answer, cite, defer, or decline—without inventing a commitment on your behalf.</p></article>
+        <article><span>03</span><h3>Fully accountable</h3><p>Every important outcome becomes a visible receipt with citations, escalations, and a meeting record.</p></article>
       </div>
     </section>
 
-    <section class="simple-section simple-workflow">
-      <div class="workflow-heading"><div class="eyebrow">Workflow</div><h2>How it works</h2><p>One prepared source of truth follows the entire conversation.</p></div>
-      <ol class="workflow-list">
-        <li><span>01</span><div><h3>Create a brief</h3><p>Set your position, goals, tone, authority, escalation rules, and references.</p></div></li>
-        <li><span>02</span><div><h3>Index the evidence</h3><p>Delegate retrieves the most relevant source excerpts with RAG.</p></div></li>
-        <li><span>03</span><div><h3>Rehearse</h3><p>Test questions and inspect how the delegate will answer, cite, or defer.</p></div></li>
-        <li><span>04</span><div><h3>Join the meeting</h3><p>Delegate joins Zoom, listens, speaks, and maintains a live transcript.</p></div></li>
-        <li><span>05</span><div><h3>Review the ledger</h3><p>Download the post-meeting record of decisions, citations, and commitments.</p></div></li>
-      </ol>
+    <section class="delegate-flow">
+      <div class="delegate-section-heading"><div class="eyebrow">From brief to meeting</div><h2>One clear chain of authority.</h2><p>Delegate carries your position from preparation to the meeting record—without losing the evidence behind it.</p></div>
+      <ol class="delegate-flow-list"><li class="flow-step"><div class="flow-step-top"><span>THE BRIEF</span><b>Set the position</b></div><p class="flow-step-copy">Add your goals, authority boundaries, and the references Delegate may use.</p></li><li class="flow-step"><div class="flow-step-top"><span>REHEARSAL</span><b>Pressure-test the call</b></div><p class="flow-step-copy">Try hard questions before the meeting and see when Delegate will answer or defer.</p></li><li class="flow-step"><div class="flow-step-top"><span>LIVE + LEDGER</span><b>Represent and account</b></div><p class="flow-step-copy">Delegate joins Zoom, then leaves a clear record with the evidence behind every outcome.</p></li></ol>
     </section>
 
-    <section class="simple-section simple-modes">
-      <div class="simple-section-intro"><div class="eyebrow">Choose a path</div></div>
-      <div class="simple-mode-grid">
-        <article class="simple-mode recommended"><div class="mode-label">Recommended for judging</div><h3>Try the interactive demo</h3><p>Explore the complete brief, rehearsal, citations, decision receipts, and commitment ledger without a live meeting.</p><button class="button primary" data-action="choose-demo">Open interactive demo ${icon('arrow')}</button></article>
-        <article class="simple-mode"><div class="mode-label">Full workflow</div><h3>Use with Zoom</h3><p>Launch Delegate into a Zoom meeting through Attendee.dev, then follow the live transcript and post-meeting record.</p><button class="button ghost" data-action="choose-full">Set up Zoom mode ${icon('arrow')}</button></article>
-      </div>
+    <section class="delegate-cta"><div><div class="eyebrow">Try it now</div><h2>See the live representative in action.</h2><p>Open a prepared brief and ask Delegate the questions that matter.</p></div><div class="delegate-cta-actions"><button class="button primary" data-action="choose-demo">Open live demo ${icon('arrow')}</button><button class="button ghost" data-action="choose-full">Set up Zoom</button></div>
     </section>
 
     <footer class="simple-footer"><span>Delegate</span><span>Evidence, authority, and accountability for every meeting.</span></footer>
@@ -551,30 +589,47 @@ async function processFinalUtterance(text) {
 
 async function handleLiveTranscription(raw) {
   const data = JSON.parse(raw);
-  if (data.type === 'Ready') { toast('Listening started', 'Say “Delegate” before a question.'); return; }
-  if (data.type === 'Error') { toast('Listening stopped', 'Restart listening and try again.'); stopMic(); return; }
-  if (data.type !== 'Results') return;
-  const text = data.channel?.alternatives?.[0]?.transcript?.trim() || '';
-  if (!data.is_final) {
+  if (data.type === 'Connected') {
+    ui.listening = true;
+    render();
+    toast('Listening started', 'Say “Delegate” before a question.');
+    return;
+  }
+  if (data.type === 'Error' || data.type === 'FatalError') { toast('Listening stopped', 'Restart listening and try again.'); stopMic(); return; }
+  if (data.type !== 'TurnInfo') return;
+  const text = String(data.transcript || '').trim();
+  if (data.event === 'StartOfTurn' || data.event === 'Update') {
     ui.liveInterim = text;
     render();
     return;
   }
+  if (data.event !== 'EndOfTurn') return;
   ui.liveInterim = '';
-  if (text) ui.finalTranscriptParts.push(text);
-  if (data.speech_final) {
-    const utterance = ui.finalTranscriptParts.join(' ');
-    ui.finalTranscriptParts = [];
-    await processFinalUtterance(utterance);
-  } else {
-    render();
+  if (text) await processFinalUtterance(text);
+  else render();
+}
+
+function pcm16Frame(samples, sourceSampleRate, targetSampleRate = 16000) {
+  const ratio = sourceSampleRate / targetSampleRate;
+  const frameLength = Math.ceil(samples.length / ratio);
+  const output = new ArrayBuffer(frameLength * 2);
+  const view = new DataView(output);
+  for (let index = 0; index < frameLength; index += 1) {
+    const start = Math.floor(index * ratio);
+    const end = Math.min(samples.length, Math.floor((index + 1) * ratio));
+    let sum = 0;
+    for (let sample = start; sample < Math.max(start + 1, end); sample += 1) sum += samples[Math.min(sample, samples.length - 1)] || 0;
+    const normalized = Math.max(-1, Math.min(1, sum / Math.max(1, end - start)));
+    view.setInt16(index * 2, normalized < 0 ? normalized * 0x8000 : normalized * 0x7fff, true);
   }
+  return output;
 }
 
 async function startMic() {
-  if (ui.mediaRecorder || ui.liveSocket) return;
-  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-    toast('Microphone capture is unavailable', 'Use a modern browser with microphone permission. No browser speech fallback is enabled.');
+  if (ui.audioProcessor || ui.liveSocket) return;
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!navigator.mediaDevices?.getUserMedia || !AudioContextClass) {
+    toast('Microphone capture is unavailable', 'Use a modern browser with microphone permission and Web Audio support.');
     return;
   }
   try {
@@ -582,44 +637,58 @@ async function startMic() {
     if (ui.audioInputId) audio.deviceId = { exact: ui.audioInputId };
     const stream = await navigator.mediaDevices.getUserMedia({ audio });
     void refreshAudioInputs();
-    const preferredType = ['audio/webm;codecs=opus', 'audio/webm'].find((type) => MediaRecorder.isTypeSupported(type));
-    const recorder = preferredType ? new MediaRecorder(stream, { mimeType: preferredType }) : new MediaRecorder(stream);
     const socketProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const liveSocket = new WebSocket(`${socketProtocol}//${location.host}/api/live-transcribe`);
+    const audioContext = new AudioContextClass();
+    const source = audioContext.createMediaStreamSource(stream);
+    const processor = audioContext.createScriptProcessor(4096, 1, 1);
     ui.micStream = stream;
-    ui.mediaRecorder = recorder;
+    ui.audioContext = audioContext;
+    ui.audioSource = source;
+    ui.audioProcessor = processor;
     ui.liveSocket = liveSocket;
     ui.finalTranscriptParts = [];
+
+    processor.onaudioprocess = (event) => {
+      event.outputBuffer.getChannelData(0).fill(0);
+      if (liveSocket.readyState !== WebSocket.OPEN) return;
+      liveSocket.send(pcm16Frame(event.inputBuffer.getChannelData(0), audioContext.sampleRate));
+    };
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+
+    const cleanUp = () => {
+      if (ui.liveSocket !== liveSocket) return;
+      processor.onaudioprocess = null;
+      try { source.disconnect(); processor.disconnect(); } catch { /* Audio graph may already be disconnected. */ }
+      stream.getTracks().forEach((track) => track.stop());
+      if (audioContext.state !== 'closed') void audioContext.close();
+      ui.liveSocket = null;
+      ui.micStream = null;
+      ui.audioContext = null;
+      ui.audioSource = null;
+      ui.audioProcessor = null;
+      ui.listening = false;
+      ui.liveInterim = '';
+      render();
+    };
+
     liveSocket.onopen = () => {
-      if (recorder.state === 'inactive') recorder.start(250);
+      void audioContext.resume();
     };
     liveSocket.onmessage = (event) => handleLiveTranscription(event.data).catch((error) => toast('Live transcription failed', error.message || 'Please restart the microphone.'));
     liveSocket.onerror = () => toast('Listening error', 'Restart listening and try again.');
-    liveSocket.onclose = () => {
-      if (ui.mediaRecorder === recorder && recorder.state !== 'inactive') recorder.stop();
-      ui.liveSocket = null;
-    };
-    recorder.onstart = () => { ui.listening = true; render(); };
-    recorder.ondataavailable = (event) => {
-      if (!event.data.size) return;
-      if (liveSocket.readyState === WebSocket.OPEN) liveSocket.send(event.data);
-    };
-    recorder.onstop = () => {
-      stream.getTracks().forEach((track) => track.stop());
-      if (liveSocket.readyState === WebSocket.OPEN) {
-        liveSocket.send(JSON.stringify({ type: 'CloseStream' }));
-        setTimeout(() => { if (liveSocket.readyState === WebSocket.OPEN) liveSocket.close(); }, 500);
-      }
-      ui.mediaRecorder = null; ui.micStream = null; ui.listening = false; ui.liveInterim = ''; render();
-    };
+    liveSocket.onclose = cleanUp;
   } catch (error) {
     toast('Microphone access failed', error.message || 'Allow microphone access and try again.');
   }
 }
 
 function stopMic() {
-  if (ui.mediaRecorder && ui.mediaRecorder.state !== 'inactive') ui.mediaRecorder.stop();
-  else if (ui.liveSocket?.readyState === WebSocket.OPEN) ui.liveSocket.close();
+  if (ui.liveSocket?.readyState === WebSocket.OPEN) {
+    ui.liveSocket.send(JSON.stringify({ type: 'CloseStream' }));
+    setTimeout(() => { if (ui.liveSocket?.readyState === WebSocket.OPEN) ui.liveSocket.close(); }, 500);
+  } else if (ui.liveSocket?.readyState === WebSocket.CONNECTING) ui.liveSocket.close();
   else liveWaveform?.update({ active: false, processing: false, stream: null });
 }
 
@@ -951,7 +1020,7 @@ document.addEventListener('click', (event) => {
   const target = event.target.closest('[data-action]'); if (!target) return;
   const action = target.dataset.action;
   if (action !== 'toggle-brief-menu') ui.briefMenuId = null;
-  if (action === 'choose-demo') { stopAttendeeEvents(); setMode('demo'); ui.view = 'briefs'; ui.modal = 'new-brief'; ui.editingBriefId = null; ui.pendingSources = []; ui.referenceDrafts = []; ui.briefDraft = null; render(); }
+  if (action === 'choose-demo') openDemo();
   if (action === 'choose-full') { stopMic(); setMode('full'); ui.view = 'overview'; ui.modal = null; const brief = activeBrief(); if (brief?.status === 'Live' && brief.attendeeSession?.id) connectAttendeeEvents(brief.id, brief.attendeeSession.id); render(); }
   if (action === 'show-landing') { clearLiveDelegateSession(); ui.mode = null; localStorage.removeItem(MODE_KEY); ui.modal = null; render(); }
   if (action === 'navigate') { ui.view = target.dataset.view; ui.modal = null; render(); }
