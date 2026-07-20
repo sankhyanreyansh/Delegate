@@ -865,11 +865,6 @@ async function createBrowserPresentation({ brief = {}, meetingSessionId = null }
       blockAds: true,
       recordSession: true,
       logSession: true
-    },
-    userMetadata: {
-      product: 'delegate',
-      meeting: String(brief.title || 'Untitled meeting').slice(0, 160),
-      meetingSessionId: meetingSessionId || 'interactive-demo'
     }
   });
   let browser;
