@@ -34,7 +34,7 @@ async function syncBrowserPresentation() {
     const response = await fetch(`/api/meetings/${encodeURIComponent(sessionId)}/screen-state`, { cache: 'no-store' });
     if (!response.ok) return;
     const state = await response.json();
-    setBrowserPresentationVisible(Boolean(state.presentationVisible), state.presentationUrl || '');
+    setBrowserPresentationVisible(Boolean(state.presentationVisible), state.liveViewUrl || state.presentationUrl || '');
   } catch {
     // Audio remains independent of the visual presentation state.
   }

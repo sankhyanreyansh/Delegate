@@ -311,8 +311,9 @@ function renderLive() {
           : 'Delegate is listening in Zoom. Address “Delegate” before a question.';
   const stageLabel = ui.thinking ? 'Preparing a response' : live ? `Representing ${escapeHtml(brief.owner)}` : demo ? 'Ready to test the brief' : 'Ready to join Zoom';
   const browserPresentation = attendee?.browserSession || brief.browserSession;
-  const browserStage = browserPresentation?.presentationUrl
-    ? `<div class="browser-presentation"><div class="browser-presentation-header"><span><span class="dot"></span> Live browser presentation</span><span>${escapeHtml(browserPresentation.currentUrl || 'Ready')}</span></div><iframe src="${escapeHtml(browserPresentation.presentationUrl)}" title="Delegate shared browser" sandbox="allow-same-origin allow-scripts" allow="clipboard-read; clipboard-write"></iframe></div>`
+  const browserEmbedUrl = browserPresentation?.liveViewUrl || browserPresentation?.presentationUrl;
+  const browserStage = browserEmbedUrl
+    ? `<div class="browser-presentation"><div class="browser-presentation-header"><span><span class="dot"></span> Live browser presentation</span><span>${escapeHtml(browserPresentation.currentUrl || 'Ready')}</span></div><iframe src="${escapeHtml(browserEmbedUrl)}" title="Delegate shared browser" sandbox="allow-same-origin allow-scripts" allow="clipboard-read; clipboard-write"></iframe></div>`
     : screenShareEnabled(brief)
       ? `<div class="browser-presentation browser-presentation-empty"><div class="browser-presentation-header"><span><span class="dot"></span> Browser presentation enabled</span></div><div><h2>${demo ? 'Open the shared browser' : 'Browser will start in Zoom'}</h2><p>${demo ? 'Start a live Browserbase session to see exactly what Delegate can show in the meeting.' : 'Delegate will create a live browser and share it when this Zoom session launches.'}</p>${demo ? '<button class="button primary" data-action="start-browser-presentation">Start browser presentation</button>' : ''}</div></div>`
       : '';
