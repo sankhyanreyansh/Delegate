@@ -230,7 +230,7 @@ function renderOverview() {
       ${statCard(String(state.ledger.length).padStart(2, '0'), 'Meeting records', 'aqua', '')}
     </div>
     <div class="dashboard-grid">
-      <section class="card card-pad"><div class="section-title"><h2>Next representation</h2><a data-action="navigate" data-view="briefs">All briefs</a></div>
+      <section class="card card-pad"><div class="section-title"><h2>Next meeting</h2><a data-action="navigate" data-view="briefs">All briefs</a></div>
         ${brief ? `<div class="brief-highlight"><div class="eyebrow">${escapeHtml(brief.meetingTime)} · ${escapeHtml(brief.attendees)}</div><h3>${escapeHtml(brief.title)}</h3><p>${escapeHtml(brief.goals)}</p><div class="brief-cta"><button class="button primary" data-action="open-live" data-id="${brief.id}">Open live delegate ${icon('arrow')}</button></div></div>` : empty('Create a brief from the Meeting briefs page to get started.')}
       </section>
       <section class="card card-pad"><div class="section-title"><h2>Recent activity</h2><a data-action="navigate" data-view="ledger">View records</a></div><div class="decision-list">${state.ledger.slice(-3).reverse().map((row) => decisionRow(row)).join('') || empty('Meeting activity will appear here.')}</div></section>
@@ -355,9 +355,11 @@ function renderTranscript(brief) {
 }
 
 function renderLedger() {
-  const rows = [...state.ledger].reverse();
-  return `<div class="page-heading"><div><div class="eyebrow">Meeting history</div><h1>Commitment ledger</h1><p>Decisions and follow-ups from your meeting briefs.</p></div><button class="button ghost" data-action="export-ledger">${icon('download')} Export report</button></div>
-    <div class="ledger-layout"><section class="card ledger-table"><div class="ledger-row ledger-head"><span>When</span><span>Meeting record</span><span>Outcome</span></div>${rows.length ? rows.map((row) => `<div class="ledger-row"><span style="color:var(--muted);font-family:'DM Mono',monospace;font-size:10px">${escapeHtml(row.time)}</span><div class="ledger-title">${escapeHtml(row.item)}<small>${escapeHtml(row.detail)}</small></div>${badge(row.outcome)}</div>`).join('') : empty('No meeting activity recorded yet.')}</section></div>`;
+  const meetings = state.briefs
+    .map((brief) => ({ brief, rows: state.ledger.filter((row) => row.briefId === brief.id).reverse() }))
+    .filter(({ rows }) => rows.length);
+  return `<div class="page-heading"><div><div class="eyebrow">Meeting history</div><h1>Commitment ledger</h1><p>Separate records for every meeting Delegate represents.</p></div></div>
+    <div class="ledger-layout">${meetings.length ? meetings.map(({ brief, rows }) => `<section class="card ledger-meeting"><header class="ledger-meeting-header"><div><div class="eyebrow">${escapeHtml(brief.meetingTime)} · ${escapeHtml(brief.attendees)}</div><h2>${escapeHtml(brief.title)}</h2><p>${rows.length} recorded outcome${rows.length === 1 ? '' : 's'}</p></div><button class="button ghost small" data-action="export-ledger" data-id="${brief.id}">${icon('download')} Export PDF</button></header><div class="ledger-table"><div class="ledger-row ledger-head"><span>When</span><span>Meeting record</span><span>Outcome</span></div>${rows.map((row) => `<div class="ledger-row"><span class="ledger-time">${escapeHtml(row.time)}</span><div class="ledger-title">${escapeHtml(row.item)}<small>${escapeHtml(row.detail)}</small></div>${badge(row.outcome)}</div>`).join('')}</div></section>`).join('') : empty('No meeting activity recorded yet. Delegate will create a separate record for each meeting brief.')}</div>`;
 }
 
 function badge(outcome) { const label = { approved: 'WITHIN BRIEF', escalated: 'ESCALATED', declined: 'DECLINED', ready: 'READY' }[outcome] || String(outcome || 'ready').toUpperCase(); return `<span class="badge ${outcome || 'ready'}">${label}</span>`; }
@@ -802,8 +804,8 @@ function resolveApproval(outcome) {
   state.approvals = state.approvals.filter((item) => item.id !== approval.id); ui.modal = null; ui.approvalId = null; persist(); render(); toast(outcome === 'approved' ? 'Approval recorded' : 'Decision declined', 'The commitment ledger has been updated.');
 }
 
-async function exportLedger() {
-  const brief = activeBrief();
+async function exportLedger(briefId = ui.activeBriefId) {
+  const brief = getBrief(briefId);
   if (!brief) return;
   try {
     toast('Generating report', 'Preparing your post-meeting PDF.');
@@ -1072,7 +1074,7 @@ document.addEventListener('click', (event) => {
   }
   if (action === 'approve-escalation') { ui.modal = 'approval'; ui.approvalId = target.dataset.id; render(); }
   if (action === 'resolve-approval') resolveApproval(target.dataset.outcome);
-  if (action === 'export-ledger') exportLedger();
+  if (action === 'export-ledger') exportLedger(target.dataset.id);
   if (action === 'check-health') healthCheck();
   if (action === 'reset-workspace') { if (confirm('Clear every local Delegate brief, transcript, approval, and ledger entry?')) { state = seedState(); ui.activeBriefId = null; ui.modal = null; persist(); render(); toast('Workspace cleared', 'Your local Delegate data has been removed.'); } }
 });
