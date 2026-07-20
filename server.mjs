@@ -1377,6 +1377,8 @@ async function launchAttendeeMeeting(req, res) {
         audio: { url: attendeeAudioUrl(session.id), sample_rate: ATTENDEE_AUDIO_SAMPLE_RATE }
       },
       ...(session.browserSession ? {
+        // Attendee only supports a bot screen share in Zoom through its web SDK.
+        zoom_settings: { sdk: 'web' },
         voice_agent_settings: { screenshare_url: publicBrowserPresentationUrl(session.browserSession) }
       } : {})
     };
