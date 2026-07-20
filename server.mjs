@@ -1368,20 +1368,18 @@ async function launchAttendeeMeeting(req, res) {
     if (brief.screenShare?.enabled === true) {
       setAttendeeStatus(session, 'preparing_browser', 'Starting Delegate’s shared browser.');
       session.browserSession = await createBrowserPresentation({ brief, meetingSessionId: session.id });
-      session.voiceAgentMode = true;
     }
-    const botSettings = session.voiceAgentMode
-      ? {
-          voice_agent_settings: {
-            url: publicPageUrl('/voice-agent.html', { session_id: session.id }),
-            screenshare_url: publicBrowserPresentationUrl(session.browserSession)
-          }
-        }
-      : {
-          websocket_settings: {
-            audio: { url: attendeeAudioUrl(session.id), sample_rate: ATTENDEE_AUDIO_SAMPLE_RATE }
-          }
-        };
+    // Attendee's current API rejects a voice-agent `url` together with a
+    // `screenshare_url`. Keep the proven bidirectional WebSocket audio path,
+    // and attach only the Browserbase page as the bot's screen-share source.
+    const botSettings = {
+      websocket_settings: {
+        audio: { url: attendeeAudioUrl(session.id), sample_rate: ATTENDEE_AUDIO_SAMPLE_RATE }
+      },
+      ...(session.browserSession ? {
+        voice_agent_settings: { screenshare_url: publicBrowserPresentationUrl(session.browserSession) }
+      } : {})
+    };
     const bot = await attendeeRequest('/bots', {
       method: 'POST',
       body: JSON.stringify({
