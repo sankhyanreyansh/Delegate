@@ -891,7 +891,19 @@ function voiceAgentPageUrl(session) {
   if (!session?.browserSession) throw new Error('A browser session is required for the voice-agent page.');
   return publicPageUrl('/voice-agent.html', {
     session_id: session.id,
-    browser_session_id: session.browserSession.id
+    owner: String(session.brief?.owner || 'Meeting owner').slice(0, 160)
+  });
+}
+
+function screenSharePageUrl(session) {
+  if (!session?.browserSession) throw new Error('A browser session is required for the screen-share page.');
+  return publicPageUrl('/screen-share.html', {
+    session_id: session.id,
+    browser_session_id: session.browserSession.id,
+    // Attendee treats a changed URL as a new share source. A fresh nonce makes
+    // every explicit “start sharing” request load the dedicated browser page,
+    // rather than retaining a stopped or cached capture from an earlier share.
+    share_id: String(session.screenShareVersion || 0)
   });
 }
 
@@ -1070,8 +1082,8 @@ function stagehandRequestInstruction(brief, task) {
 }
 
 function configuredBrowserAgentSteps() {
-  const requested = Number(process.env.BROWSER_AGENT_MAX_STEPS || 12);
-  return Math.max(2, Math.min(20, Number.isFinite(requested) ? Math.floor(requested) : 12));
+  const requested = Number(process.env.BROWSER_AGENT_MAX_STEPS || 20);
+  return Math.max(2, Math.min(40, Number.isFinite(requested) ? Math.floor(requested) : 20));
 }
 
 async function runBrowserAgent({ browserSession, brief, task }) {
@@ -1086,9 +1098,20 @@ async function runBrowserAgent({ browserSession, brief, task }) {
     page: browserPage(browserSession),
     maxSteps: configuredBrowserAgentSteps(),
     useSearch: true,
-    excludeTools: ['screenshot', 'extract', 'fillForm']
+    excludeTools: ['screenshot', 'extract', 'fillForm'],
+    callbacks: {
+      onStepFinish: async () => {
+        // Normal navigation remains in the same live stream. If a website
+        // opens a new tab, update the dedicated share page while the agent is
+        // still working so Zoom follows the active tab instead of waiting for
+        // the whole workflow to finish.
+        await refreshBrowserLiveView(browserSession).catch(() => {});
+      }
+    }
   });
-  if (!result.success) throw new Error(result.message || 'Stagehand could not complete that browser request.');
+  if (!result.success || !result.completed) {
+    throw new Error(result.message || 'Stagehand did not complete the requested browser workflow.');
+  }
   await refreshBrowserLiveView(browserSession);
   const action = {
     action: 'agent',
@@ -1104,20 +1127,19 @@ async function setMeetingScreenShare(session, presentation) {
   if (!session?.voiceAgentMode || !session.botId || !session.browserSession) return;
   const shouldShare = presentation === 'show';
   if (presentation === 'unchanged' || session.screenShareActive === shouldShare) return;
-  const pageUrl = voiceAgentPageUrl(session);
   if (shouldShare) {
+    session.screenShareVersion = (session.screenShareVersion || 0) + 1;
     await attendeeRequest(`/bots/${encodeURIComponent(session.botId)}/voice_agent_settings`, {
       method: 'PATCH',
-      body: JSON.stringify({ screenshare_url: pageUrl })
+      // This is intentionally a different page from the voice-agent URL. The
+      // voice page owns Delegate's camera and microphone; this page contains
+      // only Browserbase Live View, which Attendee captures as Zoom content.
+      body: JSON.stringify({ screenshare_url: screenSharePageUrl(session) })
     });
   } else {
     await attendeeRequest(`/bots/${encodeURIComponent(session.botId)}/voice_agent_settings`, {
       method: 'PATCH',
       body: JSON.stringify({ screenshare_url: '' })
-    });
-    await attendeeRequest(`/bots/${encodeURIComponent(session.botId)}/voice_agent_settings`, {
-      method: 'PATCH',
-      body: JSON.stringify({ url: pageUrl })
     });
   }
   session.screenShareActive = shouldShare;
@@ -1130,7 +1152,7 @@ async function setMeetingScreenShare(session, presentation) {
 }
 
 function waitForScreenShareMount() {
-  // Give Attendee's shared-page container a moment to fetch the stable
+  // Give Attendee's dedicated screen-share container a moment to fetch the
   // Browserbase Live View before Stagehand begins navigating. That keeps the
   // page load, clicks, and scrolling visible in Zoom rather than racing ahead
   // in the app-only preview.
@@ -1271,7 +1293,7 @@ async function handleMeetingTurn(session, transcript, { speakOnServer = true } =
         emitAttendeeEvent(session, { type: 'browser_error', message: browser.error });
         return browser;
       });
-    const [browser, response] = await Promise.all([
+    let [browser, response] = await Promise.all([
       browserPromise,
       generateDelegateResponse({
         brief: session.brief,
@@ -1280,6 +1302,22 @@ async function handleMeetingTurn(session, transcript, { speakOnServer = true } =
         browserAvailable: Boolean(session.browserSession)
       })
     ]);
+    // The spoken reply is emitted only after the browser workflow finishes.
+    // Never tell participants that a walkthrough is happening when the share
+    // or browser task actually failed.
+    if (browser?.error && response.action !== 'silent') {
+      response = {
+        action: 'speak',
+        response_type: 'basic',
+        message: `I couldn’t complete the browser walkthrough: ${String(browser.error).replace(/\s+/g, ' ').slice(0, 460)}`,
+        rationale: 'The requested browser workflow did not complete.',
+        evidence_ids: [],
+        citations: [],
+        authority_level: 'within_brief',
+        confidence: 1,
+        verification: { supported: true, reason: 'Operational browser status.' }
+      };
+    }
     const delegateTurn = {
       id: `mandate-${crypto.randomUUID()}`,
       speaker: 'Delegate',
@@ -1500,6 +1538,7 @@ async function launchAttendeeMeeting(req, res) {
     processingTurn: false,
     voiceAgentMode: false,
     screenShareActive: false,
+    screenShareVersion: 0,
     browserSession: null,
     startedAt: new Date().toISOString()
   };
@@ -1509,9 +1548,9 @@ async function launchAttendeeMeeting(req, res) {
       setAttendeeStatus(session, 'preparing_browser', 'Starting Delegate’s shared browser.');
       session.browserSession = await createBrowserPresentation({ brief, meetingSessionId: session.id });
     }
-    // For browser-enabled Zoom meetings, Attendee's voice-agent page carries
-    // Delegate's real-time microphone/audio path and switches between webcam
-    // and content-share output as the meeting requests a walkthrough.
+    // For browser-enabled Zoom meetings, Attendee loads a dedicated voice page
+    // for Delegate's microphone/video. Browser screen sharing is attached later
+    // as a separate page, so the two media streams never compete.
     const botSettings = session.browserSession
       ? {
           zoom_settings: { sdk: 'web' },
