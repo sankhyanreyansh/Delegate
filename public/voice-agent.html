@@ -7,7 +7,7 @@
   <style>
     :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
     * { box-sizing: border-box; }
-    body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #f7f7f5; color: #121212; }
+    body { min-height: 100vh; margin: 0; display: grid; place-items: center; overflow: hidden; background: #f7f7f5; color: #121212; }
     main { width: min(760px, calc(100% - 80px)); padding: 42px; border: 1px solid #d8d8d4; border-radius: 18px; background: #fff; text-align: center; box-shadow: 10px 12px 0 #ebebe7; }
     .mark { display: grid; width: 64px; height: 64px; margin: 0 auto 28px; place-items: center; border: 1px solid #1d1d1d; border-radius: 50%; font: 700 26px ui-monospace, SFMono-Regular, Menlo, monospace; }
     .eyebrow { margin-bottom: 10px; color: #73736f; font: 700 12px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
@@ -16,10 +16,21 @@
     .status { display: inline-flex; align-items: center; gap: 8px; margin-top: 30px; padding: 8px 12px; border: 1px solid #d8d8d4; border-radius: 999px; color: #4b4b47; font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: #2d8b55; animation: pulse 1.6s ease-in-out infinite; }
     .status.error .dot { background: #c14c45; animation: none; }
+    .browser-presentation { display: none; position: fixed; inset: 0; z-index: 1; background: #fff; }
+    .browser-presentation iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+    .browser-presentation-label { position: absolute; right: 16px; bottom: 14px; z-index: 2; padding: 6px 9px; border: 1px solid rgba(0,0,0,.18); border-radius: 999px; background: rgba(255,255,255,.92); color: #3a3a36; font: 700 10px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; }
+    body.presenting .browser-presentation { display: block; }
+    body.presenting main { position: fixed; z-index: 3; top: 18px; left: 18px; width: auto; max-width: 320px; padding: 12px 15px; border-radius: 12px; background: rgba(255,255,255,.94); box-shadow: 0 4px 20px rgba(0,0,0,.12); text-align: left; backdrop-filter: blur(8px); }
+    body.presenting .mark, body.presenting .eyebrow, body.presenting h1, body.presenting p { display: none; }
+    body.presenting .status { margin: 0; }
     @keyframes pulse { 50% { opacity: .35; transform: scale(.7); } }
   </style>
 </head>
 <body>
+  <section class="browser-presentation" id="browser-presentation" aria-hidden="true">
+    <iframe id="browser-frame" title="Delegate live browser" sandbox="allow-same-origin allow-scripts" allow="clipboard-read; clipboard-write"></iframe>
+    <span class="browser-presentation-label">DELEGATE · LIVE BROWSER</span>
+  </section>
   <main>
     <div class="mark">D</div>
     <div class="eyebrow">DELEGATE VOICE AGENT</div>
