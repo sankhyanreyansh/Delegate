@@ -1,15 +1,46 @@
 const sessionId = new URLSearchParams(location.search).get('session_id');
+const browserSessionId = new URLSearchParams(location.search).get('browser_session_id');
 const status = document.getElementById('status');
+const browserPresentation = document.getElementById('browser-presentation');
+const browserFrame = document.getElementById('browser-frame');
 let stream;
 let context;
 let source;
 let processor;
 let socket;
 let processingTurn = false;
+let browserFrameUrl = '';
+let lastPresentationVisible = null;
 
 function setStatus(message, error = false) {
   status.classList.toggle('error', error);
   status.lastElementChild.textContent = message;
+}
+
+function setBrowserPresentationVisible(visible, presentationUrl = '') {
+  // The server gives Browserbase's stable session-level Live View URL. Load it
+  // only when Zoom is actually sharing and never replace it after clicks or
+  // scrolls: the stream itself follows the controlled browser in real time.
+  if (visible && browserFrame && presentationUrl && browserFrameUrl !== presentationUrl) {
+    browserFrame.src = presentationUrl;
+    browserFrameUrl = presentationUrl;
+  }
+  if (lastPresentationVisible === visible) return;
+  lastPresentationVisible = visible;
+  document.body.classList.toggle('presenting', visible);
+  browserPresentation?.setAttribute('aria-hidden', String(!visible));
+}
+
+async function syncBrowserPresentation() {
+  if (!sessionId || !browserSessionId) return;
+  try {
+    const response = await fetch(`/api/meetings/${encodeURIComponent(sessionId)}/screen-state`, { cache: 'no-store' });
+    if (!response.ok) return;
+    const state = await response.json();
+    setBrowserPresentationVisible(Boolean(state.presentationVisible && state.liveViewUrl), state.liveViewUrl || '');
+  } catch {
+    // Audio remains independent of the visual presentation state.
+  }
 }
 
 function pcm16Frame(samples, sourceSampleRate, targetSampleRate = 16000) {
@@ -100,6 +131,8 @@ async function start() {
   socket.onmessage = (event) => handleTranscription(event.data);
   socket.onerror = () => setStatus('Meeting transcription connection failed', true);
   socket.onclose = () => setStatus('Meeting audio connection closed', true);
+  void syncBrowserPresentation();
+  if (browserSessionId) window.setInterval(() => void syncBrowserPresentation(), 1000);
 }
 
 void start().catch((error) => setStatus(error.message || 'Delegate voice agent could not start.', true));

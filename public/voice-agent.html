@@ -7,19 +7,29 @@
   <style>
     :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
     * { box-sizing: border-box; }
-    body { min-height: 100vh; margin: 0; display: grid; place-items: center; overflow: hidden; background: #fff; color: #121212; }
-    main { display: grid; place-items: center; width: 100%; height: 100vh; text-align: center; }
-    .mark { display: grid; width: 64px; height: 64px; margin: 0 auto 18px; place-items: center; border: 1px solid #1d1d1d; border-radius: 50%; background: #fff; font: 700 26px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    body { min-height: 100vh; margin: 0; display: grid; place-items: center; overflow: hidden; background: #f7f7f5; color: #121212; }
+    main { width: min(760px, calc(100% - 80px)); padding: 42px; border: 1px solid #d8d8d4; border-radius: 18px; background: #fff; text-align: center; box-shadow: 10px 12px 0 #ebebe7; }
+    .mark { display: grid; width: 64px; height: 64px; margin: 0 auto 28px; place-items: center; border: 1px solid #1d1d1d; border-radius: 50%; font: 700 26px ui-monospace, SFMono-Regular, Menlo, monospace; }
     .eyebrow { margin-bottom: 10px; color: #73736f; font: 700 12px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
     h1 { margin: 0; font-size: 35px; letter-spacing: -1.6px; }
     p { max-width: 500px; margin: 13px auto 0; color: #686864; font-size: 17px; line-height: 1.55; }
     .status { display: inline-flex; align-items: center; gap: 8px; margin-top: 30px; padding: 8px 12px; border: 1px solid #d8d8d4; border-radius: 999px; color: #4b4b47; font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: #2d8b55; animation: pulse 1.6s ease-in-out infinite; }
     .status.error .dot { background: #c14c45; animation: none; }
+    .browser-presentation { display: none; position: fixed; inset: 0; z-index: 1; background: #fff; }
+    .browser-presentation iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+    /* This page is Delegate's normal camera/audio transport until Attendee
+       switches it into a screen-share stream. */
+    body:not(.presenting) main { display: none; }
+    body.presenting .browser-presentation { display: block; }
+    body.presenting main { display: none; }
     @keyframes pulse { 50% { opacity: .35; transform: scale(.7); } }
   </style>
 </head>
 <body>
+  <section class="browser-presentation" id="browser-presentation" aria-hidden="true">
+    <iframe id="browser-frame" title="Delegate live browser" sandbox="allow-same-origin allow-scripts" allow="clipboard-read; clipboard-write"></iframe>
+  </section>
   <main>
     <div class="mark">D</div>
     <div class="eyebrow">DELEGATE VOICE AGENT</div>
