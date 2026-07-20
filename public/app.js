@@ -313,7 +313,7 @@ function renderLive() {
   const browserPresentation = attendee?.browserSession || brief.browserSession;
   const browserEmbedUrl = browserPresentation?.liveViewUrl || browserPresentation?.presentationUrl;
   const browserStage = browserEmbedUrl
-    ? `<div class="browser-presentation"><div class="browser-presentation-header"><span><span class="dot"></span> Live browser presentation</span><span>${escapeHtml(browserPresentation.currentUrl || 'Ready')}</span></div><iframe src="${escapeHtml(browserEmbedUrl)}" title="Delegate shared browser" sandbox="allow-same-origin allow-scripts" allow="clipboard-read; clipboard-write"></iframe></div>`
+    ? `<div class="browser-presentation"><div class="browser-presentation-header"><span><span class="dot"></span> Live browser presentation</span><span>${escapeHtml(browserPresentation.currentUrl || 'Ready')}</span></div><iframe data-live-browser-frame src="${escapeHtml(browserEmbedUrl)}" title="Delegate shared browser" sandbox="allow-same-origin allow-scripts" allow="clipboard-read; clipboard-write"></iframe></div>`
     : screenShareEnabled(brief)
       ? `<div class="browser-presentation browser-presentation-empty"><div class="browser-presentation-header"><span><span class="dot"></span> Browser presentation enabled</span></div><div><h2>${demo ? 'Open the shared browser' : 'Browser will start in Zoom'}</h2><p>${demo ? 'Start a live Browserbase session to see exactly what Delegate can show in the meeting.' : 'Delegate will create a live browser and share it when this Zoom session launches.'}</p>${demo ? '<button class="button primary" data-action="start-browser-presentation">Start browser presentation</button>' : ''}</div></div>`
       : '';
@@ -473,7 +473,17 @@ function rehearsalModal() {
 }
 
 function render() {
-  document.getElementById('app').innerHTML = ui.mode ? renderShell() : renderLanding();
+  const app = document.getElementById('app');
+  // Attendee status and transcript events refresh this view frequently. Keep a
+  // direct Browserbase Live View mounted when its URL has not changed so those
+  // unrelated updates cannot restart the remote video stream.
+  const existingBrowserFrame = app.querySelector('[data-live-browser-frame]');
+  const existingBrowserUrl = existingBrowserFrame?.getAttribute('src');
+  app.innerHTML = ui.mode ? renderShell() : renderLanding();
+  const nextBrowserFrame = app.querySelector('[data-live-browser-frame]');
+  if (existingBrowserFrame && existingBrowserUrl && nextBrowserFrame?.getAttribute('src') === existingBrowserUrl) {
+    nextBrowserFrame.replaceWith(existingBrowserFrame);
+  }
   syncLiveWaveform();
 }
 

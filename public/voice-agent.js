@@ -9,7 +9,7 @@ let source;
 let processor;
 let socket;
 let processingTurn = false;
-let browserFrameLoaded = false;
+let browserFrameUrl = '';
 let lastPresentationVisible = null;
 
 function setStatus(message, error = false) {
@@ -18,14 +18,17 @@ function setStatus(message, error = false) {
 }
 
 function setBrowserPresentationVisible(visible, presentationUrl = '') {
+  // Preload Browserbase's direct Live View while Delegate is listening. That
+  // lets Zoom switch to an already-connected virtual browser instead of
+  // briefly sharing this page while the browser stream starts.
+  if (browserFrame && presentationUrl && browserFrameUrl !== presentationUrl) {
+    browserFrame.src = presentationUrl;
+    browserFrameUrl = presentationUrl;
+  }
   if (lastPresentationVisible === visible) return;
   lastPresentationVisible = visible;
   document.body.classList.toggle('presenting', visible);
   browserPresentation?.setAttribute('aria-hidden', String(!visible));
-  if (visible && !browserFrameLoaded && browserFrame && presentationUrl) {
-    browserFrame.src = presentationUrl;
-    browserFrameLoaded = true;
-  }
 }
 
 async function syncBrowserPresentation() {
@@ -34,7 +37,10 @@ async function syncBrowserPresentation() {
     const response = await fetch(`/api/meetings/${encodeURIComponent(sessionId)}/screen-state`, { cache: 'no-store' });
     if (!response.ok) return;
     const state = await response.json();
-    setBrowserPresentationVisible(Boolean(state.presentationVisible), state.liveViewUrl || state.presentationUrl || '');
+    // Only ever share Browserbase's direct Live View here. The local
+    // presentation wrapper exists for backwards-compatible links in the app,
+    // but adding that extra iframe to Zoom caused stale loading screens.
+    setBrowserPresentationVisible(Boolean(state.presentationVisible && state.liveViewUrl), state.liveViewUrl || '');
   } catch {
     // Audio remains independent of the visual presentation state.
   }

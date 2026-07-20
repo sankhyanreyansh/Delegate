@@ -1043,6 +1043,9 @@ function directBrowserPlan(question) {
   if (/\b(?:stop|end|hide|turn off|close)\b[^.]{0,48}\b(?:share|screen|browser|presentation|demo)\b/i.test(request)) {
     return { action: 'none', presentation: 'hide', narration: 'Hiding the browser presentation.', complete: true };
   }
+  if (/\b(?:start|enable|turn on)\b[^.]{0,48}\b(?:screen\s+share|screen\s+sharing|browser\s+presentation)\b/i.test(request)) {
+    return { action: 'none', presentation: 'show', narration: 'Starting the browser presentation.', complete: true };
+  }
   if (/\bscroll\b/i.test(request)) {
     return {
       action: 'scroll',
@@ -1187,6 +1190,10 @@ async function setVoiceAgentScreenShare(session, presentation) {
   const pageUrl = voiceAgentPageUrl(session);
   await attendeeRequest(`/bots/${encodeURIComponent(session.botId)}/voice_agent_settings`, {
     method: 'PATCH',
+    // Attendee treats `url` and `screenshare_url` as mutually exclusive. The
+    // `url` branch turns the actual Zoom screen share off while keeping the
+    // voice-agent page—and therefore its microphone/audio path—alive so
+    // Delegate can hear a later request to start sharing again.
     body: JSON.stringify(shouldShare ? { screenshare_url: pageUrl } : { url: pageUrl })
   });
   session.screenShareActive = shouldShare;
