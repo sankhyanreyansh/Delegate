@@ -10,6 +10,7 @@ Delegate joins Zoom meetings, listens and speaks in real time, and represents th
 - **OpenAI embeddings** for semantic retrieval over meeting references.
 - **Deepgram Flux** for low-latency real-time speech-to-text and text-to-speech in both Demo and Zoom modes.
 - **Attendee.dev** for bidirectional Zoom participation.
+- **Browserbase + Playwright** for opt-in live browser walkthroughs and screen sharing in Zoom.
 - **JavaScript + Node.js** for the full-stack application.
 
 ## Run locally
@@ -34,9 +35,9 @@ npm start
 
 Open [http://localhost:4242](http://localhost:4242).
 
-For **Interactive Demo Mode**, set `OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, and `REPORT_PYTHON=.venv/bin/python` in `.env`.
+For **Interactive Demo Mode**, set `OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, and `REPORT_PYTHON=.venv/bin/python` in `.env`. To start the live browser presentation in the demo, also set `BROWSERBASE_API_KEY`.
 
-For **Zoom Mode**, also set `ATTENDEE_API_KEY`, `ATTENDEE_WEBHOOK_SECRET`, and a public HTTPS `PUBLIC_BASE_URL`. See `.env.example` for all configuration options. Never commit `.env`.
+For **Zoom Mode**, also set `ATTENDEE_API_KEY`, `ATTENDEE_WEBHOOK_SECRET`, and a public HTTPS `PUBLIC_BASE_URL`. When a meeting brief has **Enable Delegate’s live browser presentation** turned on, set `BROWSERBASE_API_KEY` (and `BROWSERBASE_PROJECT_ID` if your key does not imply a project). See `.env.example` for all configuration options. Never commit `.env`.
 
 No external sample data is required: create a brief and add a text reference directly in the app. Run `npm run verify` after configuring providers to verify OpenAI, Deepgram, Attendee, and PDF reporting.
 

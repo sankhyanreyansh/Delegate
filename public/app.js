@@ -59,6 +59,7 @@ function activeBrief() { return state.briefs.find((brief) => brief.id === ui.act
 function getBrief(id) { return state.briefs.find((brief) => brief.id === id); }
 function countSources() { return state.briefs.reduce((sum, brief) => sum + (brief.sources || []).length, 0); }
 function displaySource(id, brief = activeBrief()) { return brief?.sources?.find((source) => source.id === id)?.name || id; }
+function screenShareEnabled(brief) { return brief?.screenShare?.enabled === true || (!brief?.screenShare && brief?.id === 'delegate-demo-brief'); }
 
 function setMode(mode) {
   if (ui.mode && ui.mode !== mode) clearLiveDelegateSession();
@@ -75,8 +76,12 @@ function resetBriefLiveDelegate(brief) {
   if (remoteSessionIsActive) {
     void fetch(`/api/meetings/${encodeURIComponent(sessionId)}/end`, { method: 'POST' }).catch(() => {});
   }
+  if (brief.browserSession?.id) {
+    void fetch(`/api/browser-sessions/${encodeURIComponent(brief.browserSession.id)}`, { method: 'DELETE' }).catch(() => {});
+  }
   brief.status = 'Ready';
   brief.attendeeSession = null;
+  brief.browserSession = null;
   brief.transcript = [];
 }
 
@@ -103,6 +108,8 @@ function demoBrief() {
     status: 'Ready',
     zoomUrl: '',
     attendeeSession: null,
+    screenShare: { enabled: true },
+    browserSession: null,
     goals: 'Align on the next launch decision without creating an unsupported commitment.',
     position: 'Protect reliability before making a launch commitment. Engineering must estimate and mitigate remaining incident risks first.',
     tone: 'Clear, constructive, and professional.',
@@ -132,6 +139,8 @@ function openDemo() {
     brief = demoBrief();
     state.briefs.unshift(brief);
   }
+  if (!brief.screenShare) brief.screenShare = { enabled: true };
+  if (!('browserSession' in brief)) brief.browserSession = null;
   if (!state.profile.name) state.profile = { name: brief.owner, initials: initialsFor(brief.owner) };
   ui.activeBriefId = brief.id;
   ui.view = 'live';
@@ -299,14 +308,20 @@ function renderLive() {
           ? 'Checking the active brief and evidence.'
           : attendeeState === 'error'
             ? 'The live meeting connection needs attention.'
-            : 'Delegate is listening in Zoom. Address “Delegate” before a question.';
+          : 'Delegate is listening in Zoom. Address “Delegate” before a question.';
   const stageLabel = ui.thinking ? 'Preparing a response' : live ? `Representing ${escapeHtml(brief.owner)}` : demo ? 'Ready to test the brief' : 'Ready to join Zoom';
+  const browserPresentation = attendee?.browserSession || brief.browserSession;
+  const browserStage = browserPresentation?.presentationUrl
+    ? `<div class="browser-presentation"><div class="browser-presentation-header"><span><span class="dot"></span> Live browser presentation</span><span>${escapeHtml(browserPresentation.currentUrl || 'Ready')}</span></div><iframe src="${escapeHtml(browserPresentation.presentationUrl)}" title="Delegate shared browser" sandbox="allow-same-origin allow-scripts" allow="clipboard-read; clipboard-write"></iframe></div>`
+    : screenShareEnabled(brief)
+      ? `<div class="browser-presentation browser-presentation-empty"><div class="browser-presentation-header"><span><span class="dot"></span> Browser presentation enabled</span></div><div><h2>${demo ? 'Open the shared browser' : 'Browser will start in Zoom'}</h2><p>${demo ? 'Start a live Browserbase session to see exactly what Delegate can show in the meeting.' : 'Delegate will create a live browser and share it when this Zoom session launches.'}</p>${demo ? '<button class="button primary" data-action="start-browser-presentation">Start browser presentation</button>' : ''}</div></div>`
+      : '';
   return `<div class="page-heading"><div><div class="eyebrow">${live ? (demo ? 'Demo session' : 'Zoom session') : (demo ? 'Demo workspace' : 'Ready to join')}</div><h1>${escapeHtml(brief.title)}</h1><p>${escapeHtml(brief.meetingTime)} · ${escapeHtml(brief.attendees)}</p></div><div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button class="button ghost" data-action="select-briefs">Switch brief</button><button class="button ${live ? 'danger' : 'primary'}" data-action="${live ? 'end-live' : launchAction}">${live ? 'End session' : launchLabel}</button></div></div>
     ${pending ? `<div class="approval-banner"><span class="speaker-avatar" style="margin:0">D</span><div><b>Owner approval requested</b><span>${escapeHtml(pending.question)}</span></div><button class="button warn small" data-action="approve-escalation" data-id="${pending.id}">Review decision</button></div>` : ''}
     <div class="live-layout ${ui.thinking ? 'listening' : ''}">
       <section class="card live-panel"><div class="live-panel-header"><h2>Live transcript</h2><span class="badge ${demo ? (ui.listening ? 'approved' : 'ready') : (live && attendeeState !== 'error' ? 'approved' : 'ready')}">${demo ? (ui.listening ? 'LISTENING' : 'READY') : (live ? String(attendeeState).replace(/_/g, ' ').toUpperCase() : 'READY')}</span></div><div class="live-body"><div class="transcript">${renderTranscript(brief)}</div></div><div class="live-footer">${demo ? `<form id="demo-question-form" class="demo-question-form"><input name="question" required autocomplete="off" placeholder="Ask Delegate about this meeting…" /><button class="button primary" type="submit">Ask</button></form><div class="listening-controls">${renderListeningSource()}</div>` : `<div class="live-zoom-note"><span class="dot"></span><span>Audio is connected by the Zoom delegate. No browser microphone or audio routing is required.</span></div>`}</div></section>
-      <section class="card live-stage"><div class="stage-top"><span><span class="dot"></span> ${stageLabel}</span></div><div class="stage-content">
-        <div class="voice-visual ${visualState}" role="img" aria-label="Delegate is ${visualLabel.toLowerCase()}"><div class="elevenlabs-live-waveform" data-wave-state="${visualState}"><canvas data-elevenlabs-live-waveform aria-hidden="true"></canvas></div><div class="voice-state"><span></span>${visualLabel}</div></div><h2>${ui.thinking ? 'Checking the brief' : 'Delegate is ready'}</h2><p class="status-copy">${statusCopy}</p>
+      <section class="card live-stage"><div class="stage-top"><span><span class="dot"></span> ${stageLabel}</span></div><div class="stage-content ${browserStage ? 'with-browser-presentation' : ''}">
+        ${browserStage || `<div class="voice-visual ${visualState}" role="img" aria-label="Delegate is ${visualLabel.toLowerCase()}"><div class="elevenlabs-live-waveform" data-wave-state="${visualState}"><canvas data-elevenlabs-live-waveform aria-hidden="true"></canvas></div><div class="voice-state"><span></span>${visualLabel}</div></div><h2>${ui.thinking ? 'Checking the brief' : 'Delegate is ready'}</h2><p class="status-copy">${statusCopy}</p>`}
       </div></section>
       <section class="card live-panel"><div class="live-panel-header"><h2>Meeting brief</h2><button class="text-button" data-action="edit-brief" data-id="${brief.id}">Edit</button></div><div class="live-body">
         <div class="authority-block"><div class="meeting-status-row"><h3>Meeting status</h3><span class="brief-status">${escapeHtml(sessionLabel)}</span></div>${!demo && attendee?.botId ? `<div class="hint" style="margin-top:7px">Zoom bot: ${escapeHtml(attendee.botName || 'Delegate')}</div>` : ''}</div>
@@ -396,6 +411,7 @@ function briefModal() {
       <div class="field"><label>Your name</label><input name="owner" required value="${escapeHtml(owner)}" placeholder="Name represented by Delegate" /></div><div class="field"><label>Meeting name</label><input name="title" required value="${escapeHtml(value('title', brief?.title || ''))}" placeholder="e.g. Partner strategy review" /></div>
       <div class="field"><label>When</label><input name="meetingTime" required value="${escapeHtml(value('meetingTime', brief?.meetingTime || ''))}" placeholder="e.g. Friday · 11:00 AM" /></div><div class="field"><label>Attendees / context</label><input name="attendees" required value="${escapeHtml(value('attendees', brief?.attendees || ''))}" placeholder="e.g. Client leadership" /></div>
       ${zoomField}
+      <div class="field full"><label class="check-field"><input type="checkbox" name="screenShareEnabled" ${(value('screenShareEnabled', screenShareEnabled(brief) ? 'on' : '') === 'on') ? 'checked' : ''} /> <span><b>Enable Delegate’s live browser presentation</b><br />Delegate can use a Browserbase browser to explain, demonstrate, and navigate relevant web pages in the meeting. Leave this off when no screen sharing is needed.</span></label></div>
       <div class="field full"><label>Meeting goal</label><textarea name="goals" required placeholder="What should the delegate help this meeting accomplish?">${escapeHtml(value('goals', brief?.goals || ''))}</textarea></div>
       <div class="field full"><label>Your position</label><textarea name="position" required placeholder="What do you believe, prefer, or need to protect?">${escapeHtml(value('position', brief?.position || ''))}</textarea></div>
       <div class="field"><label>May do <span style="font-weight:400;text-transform:none">(one per line)</span></label><textarea name="authority" required placeholder="Recommend approved options&#10;Ask for a decision owner">${escapeHtml(value('authority', (brief?.authority || []).join('\n')))}</textarea></div>
@@ -497,11 +513,11 @@ async function askDelegate(question, transcriptText = question) {
   if (!brief || !question?.trim() || ui.thinking) return;
   addTranscript(brief, { speaker: 'Meeting participant', initials: 'MP', text: String(transcriptText || question).trim(), type: 'other' });
   ui.thinking = true; render();
-  let result; let provider = 'openai';
+  let result; let provider = 'openai'; let browser = null;
   try {
-    const response = await fetch('/api/delegate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ brief, transcript: brief.transcript, question }) });
+    const response = await fetch('/api/delegate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ brief, transcript: brief.transcript, question, browser_session_id: brief.browserSession?.id || '' }) });
     if (!response.ok) throw new Error((await response.json()).error || 'Delegate service is unavailable.');
-    const data = await response.json(); result = data.response; provider = data.provider;
+    const data = await response.json(); result = data.response; provider = data.provider; browser = data.browser;
   } catch (error) {
     ui.thinking = false;
     render();
@@ -509,6 +525,8 @@ async function askDelegate(question, transcriptText = question) {
     return;
   }
   ui.thinking = false; ui.lastProvider = provider;
+  if (browser?.session) brief.browserSession = browser.session;
+  if (browser?.error) toast('Browser presentation needs attention', browser.error);
   addTranscript(brief, {
     speaker: 'Delegate', initials: 'D', text: result.message, type: 'mandate', evidence: result.evidence_ids || [],
     citations: result.citations || [], responseType: result.response_type, verification: result.verification, action: result.action
@@ -735,7 +753,8 @@ function saveBrief(form) {
   state.profile = { name: owner, initials: initialsFor(owner) };
   const brief = {
     id: existing?.id || uid('brief'), title: data.get('title').trim(), owner, attendees: data.get('attendees').trim(), meetingTime: data.get('meetingTime').trim(), status: existing?.status || 'Ready',
-    zoomUrl: ui.mode === 'demo' ? existing?.zoomUrl || '' : String(data.get('zoomUrl') || '').trim(), attendeeSession: existing?.attendeeSession || null,
+    zoomUrl: ui.mode === 'demo' ? existing?.zoomUrl || '' : String(data.get('zoomUrl') || '').trim(), attendeeSession: existing?.attendeeSession || null, browserSession: null,
+    screenShare: { enabled: data.get('screenShareEnabled') === 'on' },
     goals: data.get('goals').trim(), position, tone: data.get('tone').trim(), authority: splitLines(data.get('authority')), escalation: splitLines(data.get('escalation')), sources, transcript: existing?.transcript || []
   };
   if (existing) state.briefs = state.briefs.map((item) => item.id === existing.id ? brief : item);
@@ -792,7 +811,7 @@ function captureBriefDraft() {
   const form = document.getElementById('brief-form');
   if (!form) return;
   const data = new FormData(form);
-  ui.briefDraft = Object.fromEntries(['owner', 'title', 'meetingTime', 'attendees', 'zoomUrl', 'goals', 'position', 'authority', 'escalation', 'tone']
+  ui.briefDraft = Object.fromEntries(['owner', 'title', 'meetingTime', 'attendees', 'zoomUrl', 'screenShareEnabled', 'goals', 'position', 'authority', 'escalation', 'tone']
     .map((field) => [field, String(data.get(field) || '')]));
 }
 
@@ -864,6 +883,7 @@ function recordRemoteDelegateDecision(brief, response, question, remoteTurnId = 
 function applyAttendeeSessionRecord(brief, record) {
   if (!brief || !record?.session) return;
   brief.attendeeSession = record.session;
+  if (record.session.browserSession) brief.browserSession = record.session.browserSession;
   if (['joined', 'in_meeting', 'recording', 'joining', 'waiting_room', 'listening', 'thinking', 'speaking'].includes(record.session.status)) {
     brief.status = 'Live';
   }
@@ -919,7 +939,10 @@ function connectAttendeeEvents(briefId, sessionId) {
     if (event.type === 'delegate_response') {
       appendRemoteTranscript(brief, event.entry);
       recordRemoteDelegateDecision(brief, event.response, event.question || 'Meeting question', event.entry?.id || null);
+      if (event.browser?.session) brief.browserSession = event.browser.session;
     }
+    if (event.type === 'browser_action' && event.browser) brief.browserSession = event.browser;
+    if (event.type === 'browser_error') toast('Browser presentation needs attention', event.message || 'Delegate could not update the shared browser.');
     if (event.type === 'error') toast('Live delegate needs attention', event.message || 'Check the meeting connection.');
     if (event.type === 'status_note') toast('Zoom delegate update', event.message || 'Attendee reported a meeting update.');
     persist();
@@ -1001,6 +1024,28 @@ async function endZoomDelegate() {
   }
 }
 
+async function startBrowserPresentation() {
+  const brief = activeBrief();
+  if (!brief || brief.browserSession?.id || ui.thinking) return;
+  ui.thinking = true;
+  render();
+  try {
+    const response = await fetch('/api/browser-sessions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ brief })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Delegate could not start the shared browser.');
+    brief.browserSession = data.browserSession;
+    persist();
+    toast('Browser presentation started', 'Delegate can now show and navigate the live browser in this demo.');
+  } catch (error) {
+    toast('Could not start browser presentation', error.message || 'Check the Browserbase setup and try again.');
+  } finally {
+    ui.thinking = false;
+    render();
+  }
+}
+
 function startDemoSession() {
   const brief = activeBrief();
   if (!brief) return;
@@ -1055,6 +1100,7 @@ document.addEventListener('click', (event) => {
   }
   if (action === 'start-live') { ui.modal = 'zoom-bridge'; render(); }
   if (action === 'start-demo-session') startDemoSession();
+  if (action === 'start-browser-presentation') void startBrowserPresentation();
   if (action === 'end-live') {
     if (ui.mode === 'demo') {
       const brief = activeBrief(); brief.status = 'Ready'; stopMic(); persist(); render(); toast('Demo session ended', 'The commitment ledger remains available.');

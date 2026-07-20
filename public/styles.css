@@ -407,6 +407,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .meeting-status-row h3 { margin: 0; }
 .meeting-status-row .brief-status { color: var(--muted); font-size: 10px; font-weight: 400; line-height: 1.4; }
 
+.stage-content.with-browser-presentation { min-height: 0; height: calc(100% - 43px); padding: 12px; }
+.browser-presentation { display: grid; width: 100%; height: 100%; min-height: 430px; grid-template-rows: auto 1fr; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; text-align: left; }
+.browser-presentation-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; padding: 10px 12px; border-bottom: 1px solid var(--line); color: #555; font-family: "DM Mono",monospace; font-size: 9px; }
+.browser-presentation-header > span:last-child { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.browser-presentation iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+.browser-presentation-empty { grid-template-rows: auto 1fr; }
+.browser-presentation-empty > div:last-child { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; min-height: 0; padding: 26px; text-align: left; }
+.browser-presentation-empty h2 { margin: 0 0 8px; color: #111; font-size: 20px; letter-spacing: -.6px; }
+.browser-presentation-empty p { max-width: 340px; margin: 0 0 18px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+
 @media (max-width: 540px) {
   .elevenlabs-live-waveform { height: 84px; }
+  .browser-presentation { min-height: 350px; }
 }
