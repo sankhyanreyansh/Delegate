@@ -11,10 +11,10 @@
   },
   "dependencies": {
     "@browserbasehq/sdk": "^2.16.0",
-    "playwright-core": "^1.61.1",
+    "@browserbasehq/stagehand": "^3.7.0",
     "ws": "^8.18.3"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19"
   }
 }

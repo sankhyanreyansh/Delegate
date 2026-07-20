@@ -188,16 +188,16 @@ async function verifyPdf() {
 
 async function verifyDependencies() {
   try {
-    await Promise.all([import('ws'), import('@browserbasehq/sdk'), import('playwright-core')]);
-    pass('WebSocket, Browserbase, and Playwright dependencies are installed');
+    await Promise.all([import('ws'), import('@browserbasehq/sdk'), import('@browserbasehq/stagehand')]);
+    pass('WebSocket, Browserbase, and Stagehand dependencies are installed');
   } catch {
-    fail('A required WebSocket, Browserbase, or Playwright dependency is missing. Run: npm install');
+    fail('A required WebSocket, Browserbase, or Stagehand dependency is missing. Run: npm install');
   }
 }
 
 function verifyBrowserbaseConfig() {
   if (!process.env.BROWSERBASE_API_KEY) return fail('BROWSERBASE_API_KEY is missing from .env (required for live browser presentation).');
-  pass(`Browserbase live browser is configured${process.env.BROWSERBASE_PROJECT_ID ? ' with an explicit project' : ''}`);
+  pass(`Browserbase + Stagehand live browser is configured${process.env.BROWSERBASE_PROJECT_ID ? ' with an explicit project' : ''}`);
 }
 
 console.log('\nDelegate provider verification\n');

@@ -910,9 +910,42 @@ function applyAttendeeSessionRecord(brief, record) {
   }
 }
 
+function liveRenderFingerprint(brief) {
+  const attendee = brief?.attendeeSession;
+  const browser = attendee?.browserSession || brief?.browserSession;
+  const transcript = brief?.transcript || [];
+  const latestEntry = transcript[transcript.length - 1];
+  return JSON.stringify({
+    briefStatus: brief?.status,
+    attendee: attendee ? {
+      status: attendee.status,
+      statusDetail: attendee.statusDetail,
+      screenShareActive: attendee.screenShareActive,
+      botName: attendee.botName
+    } : null,
+    browser: browser ? {
+      id: browser.id,
+      status: browser.status,
+      liveViewUrl: browser.liveViewUrl,
+      currentUrl: browser.currentUrl,
+      presentationVisible: browser.presentationVisible,
+      lastActionAt: browser.lastAction?.at
+    } : null,
+    transcriptCount: transcript.length,
+    latestTranscript: latestEntry ? [latestEntry.id, latestEntry.speaker, latestEntry.text, latestEntry.time] : null,
+    ledgerCount: state.ledger.length,
+    approvalCount: state.approvals.length
+  });
+}
+
+function renderLiveIfChanged(brief, previousFingerprint) {
+  if (ui.view === 'live' && ui.activeBriefId === brief?.id && previousFingerprint !== liveRenderFingerprint(brief)) render();
+}
+
 async function syncAttendeeSession(briefId, sessionId, showError = false) {
   const brief = getBrief(briefId);
   if (!brief || !sessionId) return;
+  const previousFingerprint = liveRenderFingerprint(brief);
   try {
     const response = await fetch(`/api/meetings/${encodeURIComponent(sessionId)}`);
     if (!response.ok) {
@@ -921,13 +954,13 @@ async function syncAttendeeSession(briefId, sessionId, showError = false) {
         brief.status = 'Ready';
         stopAttendeeEvents();
         persist();
-        if (ui.view === 'live' && ui.activeBriefId === briefId) render();
+        renderLiveIfChanged(brief, previousFingerprint);
       }
       return;
     }
     applyAttendeeSessionRecord(brief, await response.json());
     persist();
-    if (ui.view === 'live' && ui.activeBriefId === briefId) render();
+    renderLiveIfChanged(brief, previousFingerprint);
   } catch (error) {
     if (showError) toast('Live record reconnecting', 'Delegate is continuing to try to sync the meeting record.');
   }
@@ -945,8 +978,15 @@ function connectAttendeeEvents(briefId, sessionId) {
     try { event = JSON.parse(message.data); } catch { return; }
     const brief = getBrief(briefId);
     if (!brief) return;
+    // Deepgram sends interim text continuously. Re-rendering the entire live
+    // workspace for every partial phrase detaches Browserbase Live View and
+    // makes its video flicker, so wait for the final transcript event instead.
+    if (event.type === 'interim_transcript') {
+      ui.attendeeInterim = event.text || '';
+      return;
+    }
+    const previousFingerprint = liveRenderFingerprint(brief);
     if (event.type === 'status' && event.session) applyAttendeeSessionRecord(brief, { session: event.session });
-    if (event.type === 'interim_transcript') ui.attendeeInterim = event.text || '';
     if (event.type === 'transcript') appendRemoteTranscript(brief, event.entry);
     if (event.type === 'delegate_response') {
       appendRemoteTranscript(brief, event.entry);
@@ -958,7 +998,7 @@ function connectAttendeeEvents(briefId, sessionId) {
     if (event.type === 'error') toast('Live delegate needs attention', event.message || 'Check the meeting connection.');
     if (event.type === 'status_note') toast('Zoom delegate update', event.message || 'Attendee reported a meeting update.');
     persist();
-    if (ui.view === 'live' && ui.activeBriefId === briefId) render();
+    renderLiveIfChanged(brief, previousFingerprint);
   };
   events.onerror = () => void syncAttendeeSession(briefId, sessionId);
 }

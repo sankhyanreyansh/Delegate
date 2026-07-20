@@ -10,14 +10,14 @@ Delegate joins Zoom meetings, listens and speaks in real time, and represents th
 - **OpenAI embeddings** for semantic retrieval over meeting references.
 - **Deepgram Flux** for low-latency real-time speech-to-text and text-to-speech in both Demo and Zoom modes.
 - **Attendee.dev** for bidirectional Zoom participation.
-- **Browserbase + Playwright** for opt-in live browser walkthroughs and screen sharing in Zoom.
+- **Browserbase + Stagehand** for opt-in, GPT-5.6-powered live browser walkthroughs and screen sharing in Zoom.
 - **JavaScript + Node.js** for the full-stack application.
 
 ## Run locally
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 20.19+
 - Python 3
 - OpenAI and Deepgram API keys
 - Attendee.dev credentials for Zoom mode
