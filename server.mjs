@@ -807,7 +807,9 @@ function attendeeSessionSnapshot(session) {
     audioPackets: session.audioPackets || 0,
     lastAudioAt: session.lastAudioAt ? new Date(session.lastAudioAt).toISOString() : null,
     fluxEvents: session.fluxEvents || 0,
-    voiceAgentMode: Boolean(session.voiceAgentMode),
+    // The browser page streamer is reserved when screen sharing is enabled in
+    // the brief, but no page is loaded until a participant asks for it.
+    screenShareReserved: Boolean(session.screenShareReserved),
     screenShareActive: Boolean(session.screenShareActive),
     browserSession: session.browserSession ? browserSessionSnapshot(session.browserSession) : null,
     startedAt: session.startedAt
@@ -882,9 +884,9 @@ function browserSessionSnapshot(session) {
   };
 }
 
-function voiceAgentPageUrl(session) {
-  if (!session?.browserSession) throw new Error('A browser session is required for the voice-agent page.');
-  return publicPageUrl('/voice-agent.html', {
+function screenSharePageUrl(session) {
+  if (!session?.browserSession) throw new Error('A browser session is required for the screen-share page.');
+  return publicPageUrl('/screen-share.html', {
     session_id: session.id,
     browser_session_id: session.browserSession.id
   });
@@ -984,8 +986,8 @@ async function createBrowserPresentation({ brief = {}, meetingSessionId = null }
       status: 'ready',
       startedAt: new Date().toISOString(),
       lastAction: null,
-      // The voice-agent page keeps its neutral listening view until the
-      // meeting explicitly calls for a browser walkthrough.
+      // A browser is ready before the meeting starts, but is never shown in
+      // Zoom until Delegate is explicitly asked to demonstrate something.
       presentationVisible: false
     };
     browserSessions.set(session.id, session);
@@ -1030,12 +1032,14 @@ async function settleBrowserNavigation(page) {
 async function refreshBrowserLiveView(session) {
   const activePage = session.stagehand?.context?.activePage() || session.stagehand?.context?.pages?.().at(-1);
   if (activePage) session.page = activePage;
+  // Browserbase's debuggerFullscreenUrl is a session-level, live stream. It
+  // already follows navigation, clicks, and scrolls. Re-requesting it after
+  // every action can issue a new signed URL, which remounts an iframe in the
+  // app/Zoom container and makes the stream appear to flicker or fall behind.
+  if (session.liveViewUrl) return;
   const liveView = await session.client.sessions.debug(session.browserbaseId);
-  const page = browserPage(session);
-  const matchingPage = liveView.pages?.find((candidate) => candidate.url === page.url())
-    || liveView.pages?.[liveView.pages.length - 1];
-  const liveViewUrl = matchingPage?.debuggerFullscreenUrl || liveView.debuggerFullscreenUrl;
-  if (!liveViewUrl) throw new Error('Browserbase did not return a live view for the active browser tab.');
+  const liveViewUrl = liveView.debuggerFullscreenUrl || liveView.pages?.[0]?.debuggerFullscreenUrl;
+  if (!liveViewUrl) throw new Error('Browserbase did not return a live view for the shared browser.');
   session.liveViewUrl = liveViewUrl;
 }
 
@@ -1175,28 +1179,26 @@ async function runBrowserAgent({ browserSession, brief, question }) {
   return { actions, presentationChange, presentationVisible: Boolean(browserSession.presentationVisible), session: browserSessionSnapshot(browserSession) };
 }
 
-async function setVoiceAgentScreenShare(session, presentation) {
-  if (!session?.voiceAgentMode || !session.botId || !session.browserSession) return;
+async function setMeetingScreenShare(session, presentation) {
+  if (!session?.screenShareReserved || !session.botId || !session.browserSession) return;
   const shouldShare = presentation === 'show';
   if (presentation === 'unchanged' || session.screenShareActive === shouldShare) return;
-  const pageUrl = voiceAgentPageUrl(session);
   if (shouldShare) {
     await attendeeRequest(`/bots/${encodeURIComponent(session.botId)}/voice_agent_settings`, {
       method: 'PATCH',
-      body: JSON.stringify({ screenshare_url: pageUrl })
+      // Attendee's hosted API supports either a webcam voice-agent `url` or
+      // a true content-share `screenshare_url`—not both. This bot uses
+      // realtime WebSocket audio, so loading only this page starts a genuine
+      // Zoom share without creating a placeholder camera/page feed.
+      body: JSON.stringify({ screenshare_url: screenSharePageUrl(session) })
     });
   } else {
-    // Explicitly clear the active content stream first. Swapping only the
-    // camera/voice URL leaves some Zoom sessions presenting the prior page.
-    // Restore the voice page immediately afterward so Delegate can still hear
-    // a participant ask it to start sharing again.
+    // An empty screenshare_url is Attendee's actual stop operation. Do not
+    // replace it with a `url`: that would begin streaming a blank page as the
+    // bot's camera and is the beige screen users were seeing in Zoom.
     await attendeeRequest(`/bots/${encodeURIComponent(session.botId)}/voice_agent_settings`, {
       method: 'PATCH',
       body: JSON.stringify({ screenshare_url: '' })
-    });
-    await attendeeRequest(`/bots/${encodeURIComponent(session.botId)}/voice_agent_settings`, {
-      method: 'PATCH',
-      body: JSON.stringify({ url: pageUrl })
     });
   }
   session.screenShareActive = shouldShare;
@@ -1214,7 +1216,7 @@ async function runMeetingBrowserAction(session, question) {
     const browser = await runBrowserAgent({ browserSession: session.browserSession, brief: session.brief, question });
     if (browser.presentationChange && browser.presentationChange !== 'unchanged') {
       try {
-        await setVoiceAgentScreenShare(session, browser.presentationChange);
+        await setMeetingScreenShare(session, browser.presentationChange);
       } catch (error) {
         // Keep the page and app state aligned with the stream that is actually
         // active when Attendee rejects or delays a switch.
@@ -1548,7 +1550,7 @@ async function launchAttendeeMeeting(req, res) {
     fluxEvents: 0,
     speechToken: 0,
     processingTurn: false,
-    voiceAgentMode: false,
+    screenShareReserved: false,
     screenShareActive: false,
     browserSession: null,
     startedAt: new Date().toISOString()
@@ -1559,24 +1561,22 @@ async function launchAttendeeMeeting(req, res) {
       setAttendeeStatus(session, 'preparing_browser', 'Starting Delegate’s shared browser.');
       session.browserSession = await createBrowserPresentation({ brief, meetingSessionId: session.id });
     }
-    // There are two mutually exclusive Attendee audio paths. Native Zoom bots
-    // send PCM to our WebSocket. Browser-enabled Zoom meetings use a voice-agent
-    // page, which receives and returns audio through its microphone. Starting
-    // with `url` keeps the browser presentation off until Delegate is asked to
-    // demonstrate something; it can then switch to `screenshare_url` live.
-    const botSettings = session.browserSession
-      ? {
-          zoom_settings: { sdk: 'web' },
-          voice_agent_settings: {
-            url: voiceAgentPageUrl(session)
+    // Keep the meeting audio on Delegate's realtime WebSocket in every mode.
+    // When sharing is enabled in the brief, reserve Attendee's webpage-stream
+    // resources without loading a page. A separate `screenshare_url` is then
+    // patched in only for a requested walkthrough, and cleared to truly end it.
+    const botSettings = {
+      websocket_settings: {
+        audio: { url: attendeeAudioUrl(session.id), sample_rate: ATTENDEE_AUDIO_SAMPLE_RATE }
+      },
+      ...(session.browserSession
+        ? {
+            zoom_settings: { sdk: 'web' },
+            voice_agent_settings: { reserve_resources: true }
           }
-        }
-      : {
-          websocket_settings: {
-            audio: { url: attendeeAudioUrl(session.id), sample_rate: ATTENDEE_AUDIO_SAMPLE_RATE }
-          }
-        };
-    session.voiceAgentMode = Boolean(session.browserSession);
+        : {})
+    };
+    session.screenShareReserved = Boolean(session.browserSession);
     const bot = await attendeeRequest('/bots', {
       method: 'POST',
       body: JSON.stringify({
@@ -1664,8 +1664,8 @@ function attendeeSessionDetails(sessionId, res) {
 
 function attendeeScreenState(sessionId, res) {
   const session = attendeeSessions.get(sessionId);
-  if (!session || !session.voiceAgentMode || !session.browserSession) {
-    const error = new Error('This browser voice-agent session is no longer active.');
+  if (!session || !session.screenShareReserved || !session.browserSession) {
+    const error = new Error('This browser screen-share session is no longer active.');
     error.statusCode = 404;
     throw error;
   }
@@ -1678,8 +1678,8 @@ function attendeeScreenState(sessionId, res) {
 
 async function voiceAgentTurn(req, res, sessionId) {
   const session = attendeeSessions.get(sessionId);
-  if (!session || !session.voiceAgentMode) {
-    const error = new Error('This browser voice-agent session is no longer active.');
+  if (!session || !session.screenShareReserved) {
+    const error = new Error('This browser screen-share session is no longer active.');
     error.statusCode = 404;
     throw error;
   }

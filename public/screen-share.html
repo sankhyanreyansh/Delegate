@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Delegate shared browser</title>
+  <style>
+    html, body, main, iframe { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #fff; }
+    main { position: relative; }
+    iframe { display: block; border: 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <iframe id="browser-frame" title="Delegate shared browser" sandbox="allow-same-origin allow-scripts" allow="clipboard-read; clipboard-write"></iframe>
+  </main>
+  <script type="module" src="/screen-share.js"></script>
+</body>
+</html>
